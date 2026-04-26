@@ -1527,7 +1527,7 @@ async function renderAdmin() {
     if (!name || !email || !password) { errEl.textContent = 'All fields required'; errEl.style.display = 'block'; return; }
     btn.disabled = true; btn.textContent = 'Creating...';
     try {
-      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      const res = await api('/api/admin/users', { method: 'POST', body: { name, email, password } });
       if (res.success) {
         $('#admin-new-name').value = '';
         $('#admin-new-email').value = '';
