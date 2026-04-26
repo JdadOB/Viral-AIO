@@ -89,6 +89,7 @@ try { db.exec('ALTER TABLE alerts ADD COLUMN niche_median REAL DEFAULT 0'); } ca
 db.exec(`
   CREATE TABLE IF NOT EXISTS agent_outputs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
     agent TEXT NOT NULL,
     input_summary TEXT,
     raw_output TEXT,
@@ -96,10 +97,37 @@ db.exec(`
     captain_notes TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    password_hash TEXT,
+    google_id TEXT,
+    name TEXT NOT NULL DEFAULT 'User',
+    avatar_url TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL'); } catch (e) {}
+try { db.exec('ALTER TABLE accounts ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE agent_outputs ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+
+// Keep legacy global settings for backward compat
 const defaults = {
-  polling_interval_minutes:  '60',
+  polling_interval_minutes:   '60',
   viral_threshold_multiplier: '3',
   velocity_threshold:         '500',
   viral_z_threshold:          '2.5',
@@ -107,10 +135,11 @@ const defaults = {
   discord_digest_enabled:     '0',
   discord_digest_time:        '09:00',
 };
-
 for (const [k, v] of Object.entries(defaults)) {
   db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v);
 }
+
+const USER_SETTING_DEFAULTS = defaults;
 
 function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
@@ -121,4 +150,19 @@ function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, String(value));
 }
 
-module.exports = { db, getSetting, setSetting };
+function getUserSetting(userId, key) {
+  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
+  return row ? row.value : (USER_SETTING_DEFAULTS[key] ?? null);
+}
+
+function setUserSetting(userId, key, value) {
+  db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, String(value));
+}
+
+function seedUserDefaults(userId) {
+  for (const [k, v] of Object.entries(USER_SETTING_DEFAULTS)) {
+    db.prepare('INSERT OR IGNORE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)').run(userId, k, v);
+  }
+}
+
+module.exports = { db, getSetting, setSetting, getUserSetting, setUserSetting, seedUserDefaults };

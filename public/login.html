@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VIRAL TRACKER // ACCESS CONTROL</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --cyan: #00f2ff;
+      --magenta: #ff00ff;
+      --green: #00ff88;
+      --bg: #050508;
+      --surface: #0a0a12;
+      --border: rgba(0,242,255,0.15);
+      --text: #c8d6e5;
+      --dim: #4a5568;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    canvas#starfield {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+
+    .scanlines {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    }
+
+    .container {
+      position: relative; z-index: 2;
+      width: 100%; max-width: 420px;
+      padding: 1rem;
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .logo-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.8rem;
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      color: #fff;
+    }
+
+    .logo-accent { color: var(--cyan); }
+
+    .logo-sub {
+      display: block;
+      font-size: 0.65rem;
+      letter-spacing: 0.3em;
+      color: var(--dim);
+      margin-top: 0.25rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2rem;
+      box-shadow: 0 0 40px rgba(0,242,255,0.05), inset 0 1px 0 rgba(0,242,255,0.1);
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 1.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      flex: 1;
+      padding: 0.6rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--dim);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+
+    .tab.active {
+      color: var(--cyan);
+      border-bottom-color: var(--cyan);
+    }
+
+    .form-group { margin-bottom: 1.1rem; }
+
+    label {
+      display: block;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+      margin-bottom: 0.4rem;
+    }
+
+    input {
+      width: 100%;
+      background: rgba(0,242,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 0.65rem 0.75rem;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(0,242,255,0.1);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: transparent;
+      border: 1px solid var(--cyan);
+      border-radius: 2px;
+      color: var(--cyan);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 0.5rem;
+    }
+
+    .btn:hover {
+      background: rgba(0,242,255,0.1);
+      box-shadow: 0 0 20px rgba(0,242,255,0.2);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin: 1.25rem 0;
+      color: var(--dim);
+      font-size: 0.65rem;
+      letter-spacing: 0.1em;
+    }
+
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .btn-google {
+      width: 100%;
+      padding: 0.7rem;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 2px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+    }
+
+    .btn-google:hover {
+      border-color: rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.04);
+    }
+
+    .btn-google.disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .error-msg {
+      background: rgba(255,60,60,0.08);
+      border: 1px solid rgba(255,60,60,0.3);
+      border-radius: 2px;
+      color: #ff6b6b;
+      font-size: 0.72rem;
+      padding: 0.6rem 0.75rem;
+      margin-top: 0.75rem;
+      display: none;
+    }
+
+    .error-msg.show { display: block; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .sys-line {
+      font-size: 0.6rem;
+      color: var(--dim);
+      letter-spacing: 0.15em;
+      text-align: center;
+      margin-top: 1.25rem;
+    }
+
+    .sys-line span { color: var(--cyan); }
+  </style>
+</head>
+<body>
+  <canvas id="starfield"></canvas>
+  <div class="scanlines"></div>
+
+  <div class="container">
+    <div class="logo">
+      <div class="logo-title">VIRAL<span class="logo-accent">TRACK</span></div>
+      <span class="logo-sub">// ACCESS CONTROL SYSTEM</span>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('login')">[ LOGIN ]</button>
+        <button class="tab" onclick="switchTab('register')">[ REGISTER ]</button>
+      </div>
+
+      <!-- LOGIN -->
+      <div class="panel active" id="panel-login">
+        <form id="form-login" onsubmit="doLogin(event)">
+          <div class="form-group">
+            <label>// EMAIL</label>
+            <input type="email" id="login-email" placeholder="operator@domain.com" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>// PASSWORD</label>
+            <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+          </div>
+          <button class="btn" type="submit" id="btn-login">AUTHENTICATE</button>
+          <div class="error-msg" id="login-error"></div>
+        </form>
+
+        <div class="divider">OR</div>
+        <button class="btn-google" id="btn-google-login" onclick="googleAuth()">
+          <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+          CONTINUE WITH GOOGLE
+        </button>
+      </div>
+
+      <!-- REGISTER -->
+      <div class="panel" id="panel-register">
+        <form id="form-register" onsubmit="doRegister(event)">
+          <div class="form-group">
+            <label>// OPERATOR NAME</label>
+            <input type="text" id="reg-name" placeholder="Your name" required autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label>// EMAIL</label>
+            <input type="email" id="reg-email" placeholder="operator@domain.com" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>// PASSWORD (MIN 8 CHARS)</label>
+            <input type="password" id="reg-password" placeholder="••••••••" required minlength="8" autocomplete="new-password">
+          </div>
+          <button class="btn" type="submit" id="btn-register">CREATE ACCOUNT</button>
+          <div class="error-msg" id="register-error"></div>
+        </form>
+
+        <div class="divider">OR</div>
+        <button class="btn-google" id="btn-google-register" onclick="googleAuth()">
+          <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+          CONTINUE WITH GOOGLE
+        </button>
+      </div>
+    </div>
+
+    <div class="sys-line">SYS // <span>VIRALTRACK v1.0</span> // SECURE ACCESS REQUIRED</div>
+  </div>
+
+  <script>
+    // Starfield (same as main app)
+    (function() {
+      const canvas = document.getElementById('starfield');
+      const ctx = canvas.getContext('2d');
+      let stars = [];
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      function init() {
+        stars = Array.from({ length: 120 }, () => ({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          r: Math.random() * 1.2,
+          o: Math.random() * 0.6 + 0.1,
+          s: Math.random() * 0.3 + 0.05,
+        }));
+      }
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        stars.forEach(s => {
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(200,220,255,${s.o})`;
+          ctx.fill();
+          s.y -= s.s;
+          if (s.y < 0) { s.y = canvas.height; s.x = Math.random() * canvas.width; }
+        });
+        requestAnimationFrame(draw);
+      }
+      resize(); init(); draw();
+      window.addEventListener('resize', () => { resize(); init(); });
+    })();
+
+    // Check if Google OAuth is configured
+    fetch('/api/google-configured').then(r => r.json()).then(d => {
+      if (!d.configured) {
+        document.querySelectorAll('.btn-google').forEach(b => b.classList.add('disabled'));
+      }
+    }).catch(() => {});
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', (i === 0) === (tab === 'login')));
+      document.querySelectorAll('.panel').forEach((p, i) => p.classList.toggle('active', (i === 0) === (tab === 'login')));
+    }
+
+    async function doLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn-login');
+      const err = document.getElementById('login-error');
+      err.classList.remove('show');
+      btn.disabled = true;
+      btn.textContent = 'AUTHENTICATING...';
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('login-email').value,
+            password: document.getElementById('login-password').value,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) { window.location.href = '/'; return; }
+        err.textContent = data.error || 'Authentication failed';
+        err.classList.add('show');
+      } catch {
+        err.textContent = 'Connection error — try again';
+        err.classList.add('show');
+      }
+      btn.disabled = false;
+      btn.textContent = 'AUTHENTICATE';
+    }
+
+    async function doRegister(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn-register');
+      const err = document.getElementById('register-error');
+      err.classList.remove('show');
+      btn.disabled = true;
+      btn.textContent = 'CREATING...';
+      try {
+        const res = await fetch('/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: document.getElementById('reg-name').value,
+            email: document.getElementById('reg-email').value,
+            password: document.getElementById('reg-password').value,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) { window.location.href = '/'; return; }
+        err.textContent = data.error || 'Registration failed';
+        err.classList.add('show');
+      } catch {
+        err.textContent = 'Connection error — try again';
+        err.classList.add('show');
+      }
+      btn.disabled = false;
+      btn.textContent = 'CREATE ACCOUNT';
+    }
+
+    function googleAuth() {
+      window.location.href = '/auth/google';
+    }
+  </script>
+</body>
+</html>

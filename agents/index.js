@@ -9,14 +9,14 @@ function client() {
 
 // ── Context builders ──────────────────────────────────────────────────────────
 
-function getAccountsContext() {
+function getAccountsContext(userId) {
   return db.prepare(`
     SELECT username, full_name, followers_count, avg_engagement_rate, group_name
-    FROM accounts ORDER BY followers_count DESC
-  `).all();
+    FROM accounts WHERE user_id = ? ORDER BY followers_count DESC
+  `).all(userId);
 }
 
-function getRecentViral(days = 7) {
+function getRecentViral(days = 7, userId) {
   return db.prepare(`
     SELECT
       acc.username, acc.followers_count,
@@ -26,9 +26,9 @@ function getRecentViral(days = 7) {
     FROM alerts al
     JOIN posts p ON al.post_id = p.id
     JOIN accounts acc ON al.account_id = acc.id
-    WHERE al.triggered_at >= datetime('now', '-' || ? || ' days')
+    WHERE acc.user_id = ? AND al.triggered_at >= datetime('now', '-' || ? || ' days')
     ORDER BY al.multiplier DESC LIMIT 30
-  `).all(days);
+  `).all(userId, days);
 }
 
 function getProfileCaptions(username, limit = 20) {
@@ -41,11 +41,11 @@ function getProfileCaptions(username, limit = 20) {
   `).all(username, limit);
 }
 
-function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, captainNotes = null) {
+function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, captainNotes = null, userId = null) {
   const { lastInsertRowid } = db.prepare(`
-    INSERT INTO agent_outputs (agent, input_summary, raw_output, reviewed_output, captain_notes)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(agent, inputSummary, rawOutput, reviewedOutput, captainNotes);
+    INSERT INTO agent_outputs (agent, input_summary, raw_output, reviewed_output, captain_notes, user_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(agent, inputSummary, rawOutput, reviewedOutput, captainNotes, userId);
   return lastInsertRowid;
 }
 
@@ -93,9 +93,9 @@ ${rawOutput}${context ? `\n\nContext: ${context}` : ''}`,
 // ── STRATEGIST ────────────────────────────────────────────────────────────────
 // Generates daily/weekly performance reports across the agency's client roster.
 
-async function runStrategist({ days = 7 } = {}) {
-  const accounts = getAccountsContext();
-  const viral    = getRecentViral(days);
+async function runStrategist({ days = 7, userId } = {}) {
+  const accounts = getAccountsContext(userId);
+  const viral    = getRecentViral(days, userId);
 
   const accountSummary = accounts.length
     ? accounts.map(a =>
@@ -157,7 +157,7 @@ Any patterns in when content went viral. If no timing data, note that.
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Strategist', rawOutput, `${days}-day client performance report, ${accounts.length} client accounts, ${viral.length} top-performing posts`);
-  const id = saveOutput('strategist', `${days}-day report`, rawOutput, captain.reviewed, captain.notes);
+  const id = saveOutput('strategist', `${days}-day report`, rawOutput, captain.reviewed, captain.notes, userId);
 
   return { id, days, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
@@ -165,8 +165,8 @@ Any patterns in when content went viral. If no timing data, note that.
 // ── WRITER ────────────────────────────────────────────────────────────────────
 // Generates humanized captions matched to a tracked profile's style and voice.
 
-async function runWriter({ username, contentGoal = null, viralCaption = null }) {
-  const account = db.prepare('SELECT * FROM accounts WHERE username = ?').get(username);
+async function runWriter({ username, contentGoal = null, viralCaption = null, userId }) {
+  const account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(username, userId);
   if (!account) throw new Error(`@${username} is not in the database`);
 
   const captions = getProfileCaptions(username);
@@ -213,7 +213,7 @@ Format:
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Writer', rawOutput, `Captions for @${username}, ${(account.followers_count || 0).toLocaleString()} followers, ${captions.length} caption samples analyzed`);
-  const id = saveOutput('writer', `Captions for @${username}${contentGoal ? ` — ${contentGoal}` : ''}`, rawOutput, captain.reviewed, captain.notes);
+  const id = saveOutput('writer', `Captions for @${username}${contentGoal ? ` — ${contentGoal}` : ''}`, rawOutput, captain.reviewed, captain.notes, userId);
 
   return { id, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
@@ -221,9 +221,9 @@ Format:
 // ── ASSISTANT ─────────────────────────────────────────────────────────────────
 // Research agent: answers questions using database context + Instagram knowledge.
 
-async function runAssistant({ question, requestingAgent = 'user' }) {
-  const accounts = getAccountsContext();
-  const viral    = getRecentViral(30);
+async function runAssistant({ question, requestingAgent = 'user', userId }) {
+  const accounts = getAccountsContext(userId);
+  const viral    = getRecentViral(30, userId);
   const stats    = {
     totalAccounts: accounts.length,
     totalViral: viral.length,
@@ -256,16 +256,16 @@ async function runAssistant({ question, requestingAgent = 'user' }) {
   });
 
   const answer = msg.content[0].text;
-  const id = saveOutput('assistant', question.substring(0, 200), answer);
+  const id = saveOutput('assistant', question.substring(0, 200), answer, null, null, userId);
   return { id, question, answer };
 }
 
 // ── RESEARCHER ────────────────────────────────────────────────────────────────
 // Digs into current Instagram trends for a given niche or creator and reports what's working.
 
-async function runResearcher({ niche, username = null }) {
-  const accounts = getAccountsContext();
-  const viral = getRecentViral(30);
+async function runResearcher({ niche, username = null, userId }) {
+  const accounts = getAccountsContext(userId);
+  const viral = getRecentViral(30, userId);
 
   const nicheAccounts = username
     ? accounts.filter(a => a.username.toLowerCase() === username.toLowerCase())
@@ -331,7 +331,7 @@ Where is this niche underserved? What content is audiences hungry for that nobod
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Researcher', rawOutput, `Trend research for niche: "${niche}"${username ? `, creator: @${username}` : ''}`);
-  const id = saveOutput('researcher', `Trend research: ${niche}${username ? ` / @${username}` : ''}`, rawOutput, captain.reviewed, captain.notes);
+  const id = saveOutput('researcher', `Trend research: ${niche}${username ? ` / @${username}` : ''}`, rawOutput, captain.reviewed, captain.notes, userId);
 
   return { id, niche, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
@@ -339,20 +339,20 @@ Where is this niche underserved? What content is audiences hungry for that nobod
 // ── ORGANIZER ─────────────────────────────────────────────────────────────────
 // Compiles all research + strategy outputs into a clean brief with reel ideas.
 
-async function runOrganizer({ context = null } = {}) {
+async function runOrganizer({ context = null, userId } = {}) {
   const latestResearch = db.prepare(`
     SELECT raw_output, reviewed_output, input_summary, created_at
-    FROM agent_outputs WHERE agent = 'researcher'
+    FROM agent_outputs WHERE agent = 'researcher' AND user_id = ?
     ORDER BY created_at DESC LIMIT 1
-  `).get();
+  `).get(userId);
 
   const latestStrategy = db.prepare(`
     SELECT raw_output, reviewed_output, input_summary, created_at
-    FROM agent_outputs WHERE agent = 'strategist'
+    FROM agent_outputs WHERE agent = 'strategist' AND user_id = ?
     ORDER BY created_at DESC LIMIT 1
-  `).get();
+  `).get(userId);
 
-  const viral = getRecentViral(14);
+  const viral = getRecentViral(14, userId);
 
   const researchBlock = latestResearch
     ? `LATEST RESEARCHER REPORT (${latestResearch.created_at.slice(0, 10)}) — ${latestResearch.input_summary}:\n${(latestResearch.reviewed_output || latestResearch.raw_output).substring(0, 3000)}`
@@ -415,7 +415,7 @@ One single action: if the creator does only one thing this week based on this br
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Organizer', rawOutput, `Compiled brief from ${latestResearch ? 'researcher + ' : ''}${latestStrategy ? 'strategist + ' : ''}${viral.length} viral posts`);
-  const id = saveOutput('organizer', `Master brief${context ? ` — ${context.substring(0, 100)}` : ''}`, rawOutput, captain.reviewed, captain.notes);
+  const id = saveOutput('organizer', `Master brief${context ? ` — ${context.substring(0, 100)}` : ''}`, rawOutput, captain.reviewed, captain.notes, userId);
 
   return { id, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }

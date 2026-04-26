@@ -10,9 +10,15 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "apify-client": "^2.9.4",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "node-cron": "^3.0.3"
+    "express-session": "^1.19.0",
+    "memorystore": "^1.6.7",
+    "node-cron": "^3.0.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-local": "^1.0.0"
   }
 }

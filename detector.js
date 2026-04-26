@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { db, getSetting } = require('./db');
+const { db, getUserSetting } = require('./db');
 const { sendViralAlert } = require('./discord');
 
 function contentHash(caption) {
@@ -49,16 +49,16 @@ function updateAccountAvg(accountId) {
 
 // Niche baseline: compute median and stddev of ER across all non-viral posts
 // from accounts in the same group_name over the last 30 days.
-function getNicheStats(groupName) {
+function getNicheStats(groupName, userId) {
   if (!groupName) return { median: 0, stddev: 0, n: 0 };
   const posts = db.prepare(`
     SELECT p.engagement_rate
     FROM posts p
     JOIN accounts a ON p.account_id = a.id
-    WHERE a.group_name = ? AND p.is_viral = 0
+    WHERE a.group_name = ? AND a.user_id = ? AND p.is_viral = 0
       AND p.detected_at >= datetime('now', '-30 days')
     ORDER BY p.detected_at DESC LIMIT 500
-  `).all(groupName);
+  `).all(groupName, userId);
 
   if (posts.length === 0) return { median: 0, stddev: 0, n: 0 };
   const rates = posts.map(p => p.engagement_rate);
@@ -71,9 +71,10 @@ function processNewPosts(accountId, apifyPosts) {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId);
   if (!account) return [];
 
-  const multiplierThreshold = Number(getSetting('viral_threshold_multiplier')) || 3;
-  const velocityThreshold   = Number(getSetting('velocity_threshold'))           || 500;
-  const zThreshold          = Number(getSetting('viral_z_threshold'))            || 2.5;
+  const uid = account.user_id;
+  const multiplierThreshold = Number(getUserSetting(uid, 'viral_threshold_multiplier')) || 3;
+  const velocityThreshold   = Number(getUserSetting(uid, 'velocity_threshold'))           || 500;
+  const zThreshold          = Number(getUserSetting(uid, 'viral_z_threshold'))            || 2.5;
 
   const upsert = db.prepare(`
     INSERT INTO posts
@@ -131,7 +132,7 @@ function processNewPosts(accountId, apifyPosts) {
   const avgRate = accountStats.avg;
   db.prepare('UPDATE accounts SET avg_engagement_rate = ? WHERE id = ?').run(avgRate, accountId);
 
-  const nicheStats = getNicheStats(account.group_name);
+  const nicheStats = getNicheStats(account.group_name, account.user_id);
   const newAlerts = [];
 
   for (const p of apifyPosts) {
@@ -194,6 +195,7 @@ function processNewPosts(accountId, apifyPosts) {
                                           : `${totalInteractions} interactions`;
         console.log(`[Detector] VIRAL: @${account.username} — ${trigger} (${post.post_url})`);
         sendViralAlert({
+          userId: account.user_id,
           username: account.username,
           postUrl: post.post_url,
           postType: post.post_type,

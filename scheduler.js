@@ -1,4 +1,4 @@
-const { db, getSetting } = require('./db');
+const { db, getSetting, getUserSetting } = require('./db');
 const { scrapeAccountPosts } = require('./apify');
 const { processNewPosts } = require('./detector');
 const { sendDailyDigest } = require('./discord');
@@ -63,20 +63,19 @@ function setupScheduler() {
 function setupDigestScheduler() {
   if (digestTimer) clearInterval(digestTimer);
 
-  // Check every minute if it's time to send the digest
   digestTimer = setInterval(() => {
-    const enabled = getSetting('discord_digest_enabled');
-    if (enabled !== '1') return;
-
-    const digestTime = getSetting('discord_digest_time') || '09:00';
     const now = new Date();
-    const [h, m] = digestTime.split(':').map(Number);
     const today = now.toDateString();
+    const users = db.prepare('SELECT id FROM users').all();
 
-    if (now.getHours() === h && now.getMinutes() === m && lastDigestDate !== today) {
-      lastDigestDate = today;
-      console.log('[Scheduler] Sending daily Discord digest');
-      sendDailyDigest(db).catch(console.error);
+    for (const { id: userId } of users) {
+      if (getUserSetting(userId, 'discord_digest_enabled') !== '1') continue;
+      const [h, m] = (getUserSetting(userId, 'discord_digest_time') || '09:00').split(':').map(Number);
+      const key = `${userId}:${today}`;
+      if (now.getHours() === h && now.getMinutes() === m && lastDigestDate !== key) {
+        lastDigestDate = key;
+        sendDailyDigest(db, userId).catch(console.error);
+      }
     }
   }, 60 * 1000);
 }

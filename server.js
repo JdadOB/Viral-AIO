@@ -16,8 +16,12 @@ const cors    = require('cors');
 const path    = require('path');
 const https   = require('https');
 const http    = require('http');
+const session = require('express-session');
+const MemoryStore = require('memorystore')(session);
+const bcrypt  = require('bcryptjs');
+const passport = require('./auth');
 
-const { db, getSetting, setSetting } = require('./db');
+const { db, getSetting, setSetting, getUserSetting, setUserSetting, seedUserDefaults } = require('./db');
 const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
@@ -27,32 +31,106 @@ const { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOr
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'viral-track-secret-change-in-prod',
+  resave: false,
+  saveUninitialized: false,
+  store: new MemoryStore({ checkPeriod: 86400000 }),
+  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 },
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+function requireAuth(req, res, next) {
+  if (req.isAuthenticated()) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+  res.redirect('/login');
+}
+
+// Serve static assets without auth (CSS, JS, etc.)
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+
+// Auth routes (no auth required)
+app.get('/login', (req, res) => {
+  if (req.isAuthenticated()) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/auth/register', (req, res) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) return res.status(400).json({ error: 'All fields required' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  if (existing) return res.status(409).json({ error: 'Email already registered' });
+  const hash = bcrypt.hashSync(password, 10);
+  const { lastInsertRowid } = db.prepare(
+    'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
+  ).run(email.toLowerCase().trim(), hash, name.trim());
+  seedUserDefaults(lastInsertRowid);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(lastInsertRowid);
+  req.login(user, err => {
+    if (err) return res.status(500).json({ error: 'Login failed' });
+    res.json({ success: true });
+  });
+});
+
+app.post('/auth/login', (req, res, next) => {
+  passport.authenticate('local', (err, user, info) => {
+    if (err) return next(err);
+    if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
+    req.login(user, err => {
+      if (err) return next(err);
+      res.json({ success: true });
+    });
+  })(req, res, next);
+});
+
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login?error=google' }),
+  (req, res) => res.redirect('/')
+);
+
+app.get('/auth/logout', (req, res) => {
+  req.logout(() => res.redirect('/login'));
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  const { id, email, name, avatar_url } = req.user;
+  res.json({ id, email, name, avatar_url });
+});
+
+// Main app — auth required
+app.get('/', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ── Accounts ─────────────────────────────────────────────────────────────────
 
-app.get('/api/accounts', (_req, res) => {
+app.get('/api/accounts', requireAuth, (_req, res) => {
   const rows = db.prepare(`
     SELECT a.*,
       (SELECT COUNT(*) FROM alerts WHERE account_id = a.id) as total_alerts,
       (SELECT COUNT(*) FROM alerts WHERE account_id = a.id AND viewed = 0) as unread_alerts
     FROM accounts a
+    WHERE a.user_id = ?
     ORDER BY a.created_at DESC
-  `).all();
+  `).all(_req.user.id);
   res.json(rows);
 });
 
-app.post('/api/accounts', async (req, res) => {
+app.post('/api/accounts', requireAuth, async (req, res) => {
   const { username, group_name } = req.body;
   if (!username) return res.status(400).json({ error: 'username required' });
 
   const clean = username.replace('@', '').toLowerCase().trim();
-  const exists = db.prepare('SELECT id FROM accounts WHERE username = ?').get(clean);
+  const exists = db.prepare('SELECT id FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.user.id);
   if (exists) return res.status(409).json({ error: 'Account already tracked' });
 
   const { lastInsertRowid: accountId } = db.prepare(
-    'INSERT INTO accounts (username, group_name) VALUES (?, ?)'
-  ).run(clean, group_name || 'Default');
+    'INSERT INTO accounts (username, group_name, user_id) VALUES (?, ?, ?)'
+  ).run(clean, group_name || 'Default', req.user.id);
 
   res.status(202).json({ id: accountId, username: clean, message: 'Added — initial scrape running in background' });
 
@@ -68,25 +146,25 @@ app.post('/api/accounts', async (req, res) => {
   });
 });
 
-app.patch('/api/accounts/:id', (req, res) => {
+app.patch('/api/accounts/:id', requireAuth, (req, res) => {
   const { group_name } = req.body;
-  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(req.params.id);
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
   if (group_name !== undefined)
     db.prepare('UPDATE accounts SET group_name = ? WHERE id = ?').run(group_name, account.id);
   res.json(db.prepare('SELECT * FROM accounts WHERE id = ?').get(account.id));
 });
 
-app.post('/api/accounts/:id/poll', (req, res) => {
-  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id);
+app.post('/api/accounts/:id/poll', requireAuth, (req, res) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
   res.json({ message: `Scanning @${account.username}` });
   const { pollAccount } = require('./scheduler');
   pollAccount(account).catch(console.error);
 });
 
-app.delete('/api/accounts/:id', (req, res) => {
-  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(req.params.id);
+app.delete('/api/accounts/:id', requireAuth, (req, res) => {
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id);
   res.json({ success: true });
@@ -94,7 +172,7 @@ app.delete('/api/accounts/:id', (req, res) => {
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
 
-app.get('/api/alerts', (req, res) => {
+app.get('/api/alerts', requireAuth, (req, res) => {
   const { filter, sort, group } = req.query;
   const where = filter === 'unread'    ? 'AND al.viewed = 0 AND al.dismissed = 0'
               : filter === 'acted_on'  ? 'AND al.acted_on = 1'
@@ -118,10 +196,10 @@ app.get('/api/alerts', (req, res) => {
     JOIN posts p      ON al.post_id    = p.id
     JOIN accounts acc ON al.account_id = acc.id
     LEFT JOIN briefs b ON b.alert_id   = al.id
-    WHERE 1=1 ${where} ${groupWhere}
+    WHERE acc.user_id = ? ${where} ${groupWhere}
     ORDER BY ${orderBy}
     LIMIT 200
-  `).all(...(group ? [group] : []));
+  `).all(...(group ? [req.user.id, group] : [req.user.id]));
 
   res.json(rows.map(r => {
     let brief = null;
@@ -132,28 +210,28 @@ app.get('/api/alerts', (req, res) => {
   }));
 });
 
-app.patch('/api/alerts/:id/viewed', (req, res) => {
-  db.prepare('UPDATE alerts SET viewed = 1 WHERE id = ?').run(req.params.id);
+app.patch('/api/alerts/:id/viewed', requireAuth, (req, res) => {
+  db.prepare('UPDATE alerts SET viewed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.user.id);
   res.json({ success: true });
 });
 
-app.patch('/api/alerts/:id/acted-on', (req, res) => {
+app.patch('/api/alerts/:id/acted-on', requireAuth, (req, res) => {
   const { acted_on } = req.body;
-  db.prepare('UPDATE alerts SET acted_on = ? WHERE id = ?').run(acted_on ? 1 : 0, req.params.id);
+  db.prepare('UPDATE alerts SET acted_on = ? WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(acted_on ? 1 : 0, req.params.id, req.user.id);
   res.json({ success: true });
 });
 
-app.patch('/api/alerts/:id/dismiss', (req, res) => {
-  db.prepare('UPDATE alerts SET dismissed = 1 WHERE id = ?').run(req.params.id);
+app.patch('/api/alerts/:id/dismiss', requireAuth, (req, res) => {
+  db.prepare('UPDATE alerts SET dismissed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.user.id);
   res.json({ success: true });
 });
 
-app.delete('/api/alerts/acted-on', (req, res) => {
-  const info = db.prepare('UPDATE alerts SET dismissed = 1 WHERE acted_on = 1').run();
+app.delete('/api/alerts/acted-on', requireAuth, (req, res) => {
+  const info = db.prepare('UPDATE alerts SET dismissed = 1 WHERE acted_on = 1 AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.user.id);
   res.json({ success: true, dismissed: info.changes });
 });
 
-app.post('/api/alerts/:id/brief', async (req, res) => {
+app.post('/api/alerts/:id/brief', requireAuth, async (req, res) => {
   try {
     const brief = await generateBrief(parseInt(req.params.id));
     res.json(brief);
@@ -165,18 +243,18 @@ app.post('/api/alerts/:id/brief', async (req, res) => {
 
 // ── Browser Scrape (for age-restricted / private accounts) ────────────────────
 
-app.post('/api/browser-scrape', (req, res) => {
+app.post('/api/browser-scrape', requireAuth, (req, res) => {
   const { username, followers_count, full_name, profile_pic_url, posts } = req.body;
   if (!username || !Array.isArray(posts) || posts.length === 0)
     return res.status(400).json({ error: 'username and posts[] required' });
 
   const clean = username.replace('@', '').toLowerCase().trim();
 
-  let account = db.prepare('SELECT * FROM accounts WHERE username = ?').get(clean);
+  let account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.user.id);
   if (!account) {
     const { lastInsertRowid } = db.prepare(
-      'INSERT INTO accounts (username, group_name, followers_count, full_name, profile_pic_url) VALUES (?, ?, ?, ?, ?)'
-    ).run(clean, 'Default', followers_count || 0, full_name || null, profile_pic_url || null);
+      'INSERT INTO accounts (username, group_name, followers_count, full_name, profile_pic_url, user_id) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(clean, 'Default', followers_count || 0, full_name || null, profile_pic_url || null, req.user.id);
     account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(lastInsertRowid);
   } else if (followers_count) {
     db.prepare('UPDATE accounts SET followers_count = ?, full_name = COALESCE(?, full_name), profile_pic_url = COALESCE(?, profile_pic_url) WHERE id = ?')
@@ -207,9 +285,13 @@ app.post('/api/browser-scrape', (req, res) => {
 
 // ── Poll ──────────────────────────────────────────────────────────────────────
 
-app.post('/api/poll', (req, res) => {
+app.post('/api/poll', requireAuth, (req, res) => {
   res.json({ message: 'Poll started' });
   pollAllAccounts().catch(console.error);
+});
+
+app.get('/api/google-configured', (_req, res) => {
+  res.json({ configured: !!process.env.GOOGLE_CLIENT_ID });
 });
 
 // ── Image Proxy (bypasses Instagram hotlink protection) ───────────────────────
@@ -243,57 +325,60 @@ app.get('/api/img', (req, res) => {
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
-app.get('/api/stats', (_req, res) => {
+app.get('/api/stats', requireAuth, (req, res) => {
+  const uid = req.user.id;
   res.json({
-    totalAccounts: db.prepare('SELECT COUNT(*) as c FROM accounts').get().c,
-    totalAlerts:   db.prepare('SELECT COUNT(*) as c FROM alerts').get().c,
-    unreadAlerts:  db.prepare('SELECT COUNT(*) as c FROM alerts WHERE viewed = 0').get().c,
-    actedOn:       db.prepare('SELECT COUNT(*) as c FROM alerts WHERE acted_on = 1').get().c,
-    totalBriefs:   db.prepare('SELECT COUNT(*) as c FROM briefs').get().c,
+    totalAccounts: db.prepare('SELECT COUNT(*) as c FROM accounts WHERE user_id = ?').get(uid).c,
+    totalAlerts:   db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(uid).c,
+    unreadAlerts:  db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.viewed = 0').get(uid).c,
+    actedOn:       db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.acted_on = 1').get(uid).c,
+    totalBriefs:   db.prepare('SELECT COUNT(*) as c FROM briefs b JOIN alerts al ON b.alert_id = al.id JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(uid).c,
   });
 });
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-app.get('/api/settings', (_req, res) => {
+app.get('/api/settings', requireAuth, (req, res) => {
+  const uid = req.user.id;
   res.json({
-    polling_interval_minutes:    getSetting('polling_interval_minutes'),
-    viral_threshold_multiplier:  getSetting('viral_threshold_multiplier'),
-    velocity_threshold:          getSetting('velocity_threshold'),
-    discord_channel_id:          getSetting('discord_channel_id') || '',
+    polling_interval_minutes:    getUserSetting(uid, 'polling_interval_minutes'),
+    viral_threshold_multiplier:  getUserSetting(uid, 'viral_threshold_multiplier'),
+    velocity_threshold:          getUserSetting(uid, 'velocity_threshold'),
+    discord_channel_id:          getUserSetting(uid, 'discord_channel_id') || '',
     discord_bot_configured:      !!process.env.DISCORD_BOT_TOKEN,
-    discord_digest_enabled:      getSetting('discord_digest_enabled') || '0',
-    discord_digest_time:         getSetting('discord_digest_time')    || '09:00',
+    discord_digest_enabled:      getUserSetting(uid, 'discord_digest_enabled') || '0',
+    discord_digest_time:         getUserSetting(uid, 'discord_digest_time')    || '09:00',
   });
 });
 
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', requireAuth, (req, res) => {
+  const uid = req.user.id;
   const {
     polling_interval_minutes, viral_threshold_multiplier, velocity_threshold,
     discord_channel_id, discord_digest_enabled, discord_digest_time,
   } = req.body;
-  if (polling_interval_minutes) { setSetting('polling_interval_minutes', polling_interval_minutes); restartScheduler(); }
-  if (viral_threshold_multiplier) setSetting('viral_threshold_multiplier', viral_threshold_multiplier);
-  if (velocity_threshold)         setSetting('velocity_threshold', velocity_threshold);
-  if (discord_channel_id    !== undefined) setSetting('discord_channel_id',    discord_channel_id);
-  if (discord_digest_enabled !== undefined) setSetting('discord_digest_enabled', discord_digest_enabled ? '1' : '0');
-  if (discord_digest_time    !== undefined) setSetting('discord_digest_time',    discord_digest_time);
+  if (polling_interval_minutes)   setUserSetting(uid, 'polling_interval_minutes',   polling_interval_minutes);
+  if (viral_threshold_multiplier) setUserSetting(uid, 'viral_threshold_multiplier', viral_threshold_multiplier);
+  if (velocity_threshold)         setUserSetting(uid, 'velocity_threshold',          velocity_threshold);
+  if (discord_channel_id    !== undefined) setUserSetting(uid, 'discord_channel_id',    discord_channel_id);
+  if (discord_digest_enabled !== undefined) setUserSetting(uid, 'discord_digest_enabled', discord_digest_enabled ? '1' : '0');
+  if (discord_digest_time    !== undefined) setUserSetting(uid, 'discord_digest_time',    discord_digest_time);
   res.json({ success: true });
 });
 
-app.post('/api/discord/test', async (req, res) => {
+app.post('/api/discord/test', requireAuth, async (req, res) => {
   const { testConnection } = require('./discord');
-  const channelId = req.body.channel_id || getSetting('discord_channel_id');
+  const channelId = req.body.channel_id || getUserSetting(req.user.id, 'discord_channel_id');
   const result = await testConnection(channelId);
   res.json(result);
 });
 
 // ── Agents ────────────────────────────────────────────────────────────────────
 
-app.post('/api/agents/strategist', async (req, res) => {
+app.post('/api/agents/strategist', requireAuth, async (req, res) => {
   try {
     const { days = 7 } = req.body;
-    const result = await runStrategist({ days: parseInt(days) });
+    const result = await runStrategist({ days: parseInt(days), userId: req.user.id });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Strategist]', err.message);
@@ -301,11 +386,11 @@ app.post('/api/agents/strategist', async (req, res) => {
   }
 });
 
-app.post('/api/agents/writer', async (req, res) => {
+app.post('/api/agents/writer', requireAuth, async (req, res) => {
   try {
     const { username, contentGoal, viralCaption } = req.body;
     if (!username) return res.status(400).json({ error: 'username required' });
-    const result = await runWriter({ username, contentGoal, viralCaption });
+    const result = await runWriter({ username, contentGoal, viralCaption, userId: req.user.id });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Writer]', err.message);
@@ -313,11 +398,11 @@ app.post('/api/agents/writer', async (req, res) => {
   }
 });
 
-app.post('/api/agents/assistant', async (req, res) => {
+app.post('/api/agents/assistant', requireAuth, async (req, res) => {
   try {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: 'question required' });
-    const result = await runAssistant({ question });
+    const result = await runAssistant({ question, userId: req.user.id });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Assistant]', err.message);
@@ -325,7 +410,7 @@ app.post('/api/agents/assistant', async (req, res) => {
   }
 });
 
-app.post('/api/agents/captain', async (req, res) => {
+app.post('/api/agents/captain', requireAuth, async (req, res) => {
   try {
     const { outputId } = req.body;
     if (!outputId) return res.status(400).json({ error: 'outputId required' });
@@ -341,11 +426,11 @@ app.post('/api/agents/captain', async (req, res) => {
   }
 });
 
-app.post('/api/agents/researcher', async (req, res) => {
+app.post('/api/agents/researcher', requireAuth, async (req, res) => {
   try {
     const { niche, username } = req.body;
     if (!niche) return res.status(400).json({ error: 'niche required' });
-    const result = await runResearcher({ niche, username: username || null });
+    const result = await runResearcher({ niche, username: username || null, userId: req.user.id });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Researcher]', err.message);
@@ -353,10 +438,10 @@ app.post('/api/agents/researcher', async (req, res) => {
   }
 });
 
-app.post('/api/agents/organizer', async (req, res) => {
+app.post('/api/agents/organizer', requireAuth, async (req, res) => {
   try {
     const { context } = req.body;
-    const result = await runOrganizer({ context: context || null });
+    const result = await runOrganizer({ context: context || null, userId: req.user.id });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Organizer]', err.message);
@@ -364,11 +449,12 @@ app.post('/api/agents/organizer', async (req, res) => {
   }
 });
 
-app.get('/api/agents/history', (req, res) => {
+app.get('/api/agents/history', requireAuth, (req, res) => {
   const { agent } = req.query;
+  const uid = req.user.id;
   const rows = agent
-    ? db.prepare('SELECT * FROM agent_outputs WHERE agent = ? ORDER BY created_at DESC LIMIT 20').all(agent)
-    : db.prepare('SELECT * FROM agent_outputs ORDER BY created_at DESC LIMIT 50').all();
+    ? db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? AND agent = ? ORDER BY created_at DESC LIMIT 20').all(uid, agent)
+    : db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(uid);
   res.json(rows);
 });
 

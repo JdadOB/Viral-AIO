@@ -1370,6 +1370,12 @@ setInterval(updateStats, 30000);
   requestAnimationFrame(draw);
 })();
 
+// ── Operator Info ─────────────────────────────────────────────────────────────
+fetch('/api/me').then(r => r.json()).then(user => {
+  const el = document.getElementById('operator-name');
+  if (el && user.name) el.textContent = user.name.toUpperCase();
+}).catch(() => {});
+
 // ── Agent Behavior Loop ───────────────────────────────────────────────────────
 setInterval(() => {
   for (const [key, activities] of Object.entries(AGENT_IDLE_ACTIVITIES)) {

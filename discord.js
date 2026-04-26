@@ -1,4 +1,4 @@
-const { getSetting } = require('./db');
+const { getUserSetting } = require('./db');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
@@ -19,8 +19,8 @@ async function post(channelId, payload) {
   }
 }
 
-async function sendViralAlert({ username, postUrl, postType, multiplier, engagementRate, likes, comments, plays, caption, thumbnailUrl }) {
-  const channelId = getSetting('discord_channel_id');
+async function sendViralAlert({ userId, username, postUrl, postType, multiplier, engagementRate, likes, comments, plays, caption, thumbnailUrl }) {
+  const channelId = userId ? getUserSetting(userId, 'discord_channel_id') : null;
   if (!channelId) return;
 
   const totalInteractions = likes + comments + plays;
@@ -47,8 +47,8 @@ async function sendViralAlert({ username, postUrl, postType, multiplier, engagem
   await post(channelId, { embeds: [embed] });
 }
 
-async function sendDailyDigest(db) {
-  const channelId = getSetting('discord_channel_id');
+async function sendDailyDigest(db, userId) {
+  const channelId = getUserSetting(userId, 'discord_channel_id');
   if (!channelId) return;
 
   const rows = db.prepare(`
@@ -59,15 +59,16 @@ async function sendDailyDigest(db) {
     FROM alerts al
     JOIN posts p      ON al.post_id    = p.id
     JOIN accounts acc ON al.account_id = acc.id
-    WHERE al.triggered_at >= datetime('now', '-1 day')
+    WHERE acc.user_id = ? AND al.triggered_at >= datetime('now', '-1 day')
       AND al.dismissed = 0
     ORDER BY al.engagement_rate DESC
     LIMIT 10
-  `).all();
+  `).all(userId);
 
   const total = db.prepare(
-    `SELECT COUNT(*) as c FROM alerts WHERE triggered_at >= datetime('now', '-1 day') AND dismissed = 0`
-  ).get().c;
+    `SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id
+     WHERE acc.user_id = ? AND al.triggered_at >= datetime('now', '-1 day') AND al.dismissed = 0`
+  ).get(userId).c;
 
   if (total === 0) {
     await post(channelId, { content: '📊 **Daily Digest** — No viral posts detected in the last 24 hours.' });
