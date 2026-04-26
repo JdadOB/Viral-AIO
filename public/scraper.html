@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Instagram Scraper Helper — Viral Tracker</title>
+  <style>
+    :root {
+      --bg: #06090f;
+      --cyan: #00d4ff;
+      --magenta: #ff0080;
+      --green: #00ff88;
+      --panel: #0d1117;
+      --border: rgba(0,212,255,0.2);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: #c8d6e5;
+      font-family: 'Share Tech Mono', monospace;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+    h1 { color: var(--cyan); font-size: 1.4rem; margin-bottom: 0.25rem; letter-spacing: 2px; }
+    .sub { color: var(--magenta); font-size: 0.75rem; margin-bottom: 2rem; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 { color: var(--cyan); font-size: 0.85rem; letter-spacing: 2px; margin-bottom: 1rem; }
+    .step { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: flex-start; }
+    .step-num {
+      background: var(--magenta);
+      color: #fff;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step p { font-size: 0.85rem; line-height: 1.6; color: #8899aa; }
+    .step p strong { color: #c8d6e5; }
+    code {
+      background: rgba(0,212,255,0.08);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.8rem;
+      color: var(--cyan);
+    }
+    .script-box {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      font-size: 0.72rem;
+      line-height: 1.5;
+      color: #7ec8e3;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 0.75rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: transparent;
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      padding: 0.5rem 1.2rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+      margin-top: 0.75rem;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: rgba(0,212,255,0.1); }
+    .btn.green { border-color: var(--green); color: var(--green); }
+    .btn.green:hover { background: rgba(0,255,136,0.1); }
+    #status {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      display: none;
+    }
+    #status.ok { background: rgba(0,255,136,0.1); border: 1px solid var(--green); color: var(--green); }
+    #status.err { background: rgba(255,0,128,0.1); border: 1px solid var(--magenta); color: var(--magenta); }
+    .bookmarklet-link {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.5rem 1.2rem;
+      border: 1px solid var(--magenta);
+      color: var(--magenta);
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 0.8rem;
+      letter-spacing: 1px;
+    }
+    .bookmarklet-link:hover { background: rgba(255,0,128,0.1); }
+    .note { font-size: 0.75rem; color: #556677; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>// INSTAGRAM SCRAPER HELPER</h1>
+  <p class="sub">For age-restricted / 18+ accounts that Apify cannot access</p>
+
+  <div class="card">
+    <h2>[ HOW IT WORKS ]</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <p>Log into Instagram in your browser normally. Navigate to the target account's profile page (e.g. <strong>instagram.com/babebellalynnx</strong>).</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <p>Open the browser console (<strong>F12 → Console</strong>) and paste the script below. It will scrape the visible posts using your authenticated session.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <p>The script sends the data to <code>localhost:3000</code> — your running Viral Tracker app processes it and generates alerts automatically.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>[ CONSOLE SCRIPT ]</h2>
+    <p class="note">Copy this entire block and paste it into your browser console while on the Instagram profile page:</p>
+    <div class="script-box" id="scriptBox"></div>
+    <button class="btn" onclick="copyScript()">⧉ COPY SCRIPT</button>
+    <p class="note" style="margin-top:0.75rem">Or drag this bookmarklet to your bookmarks bar for one-click use:</p>
+    <a id="bookmarkletLink" class="bookmarklet-link" href="#">⚡ SCRAPE THIS PROFILE</a>
+    <p class="note">Drag that link to your bookmarks bar. Then click it whenever you're on an Instagram profile page.</p>
+  </div>
+
+  <div class="card">
+    <h2>[ TEST MANUALLY ]</h2>
+    <p style="font-size:0.82rem;color:#8899aa;margin-bottom:0.75rem">You can also manually submit data. Paste JSON posts array from console output:</p>
+    <div style="margin-bottom:0.75rem">
+      <label style="font-size:0.75rem;color:#556677;display:block;margin-bottom:0.25rem">Instagram Username</label>
+      <input id="username" type="text" placeholder="e.g. babebellalynnx" style="background:#000;border:1px solid var(--border);color:#c8d6e5;padding:0.5rem;border-radius:4px;width:100%;font-family:inherit;font-size:0.82rem">
+    </div>
+    <div style="margin-bottom:0.75rem">
+      <label style="font-size:0.75rem;color:#556677;display:block;margin-bottom:0.25rem">Followers Count</label>
+      <input id="followers" type="number" placeholder="e.g. 936000" style="background:#000;border:1px solid var(--border);color:#c8d6e5;padding:0.5rem;border-radius:4px;width:100%;font-family:inherit;font-size:0.82rem">
+    </div>
+    <button class="btn green" onclick="testSubmit()">▶ SUBMIT TEST DATA</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const TRACKER_URL = 'http://localhost:3000';
+
+    const scriptContent = `(async () => {
+  const HOST = '${location.protocol}//${location.host}';
+
+  // Extract username from URL
+  const username = location.pathname.replace(/\\//g, '').split('?')[0];
+  if (!username || username.includes('.')) {
+    alert('Navigate to an Instagram profile page first (e.g. instagram.com/username)');
+    return;
+  }
+
+  console.log('[VT] Scraping @' + username + '...');
+
+  // Get follower count from page
+  let followers = 0;
+  let fullName = '';
+  let profilePic = '';
+  try {
+    const metaEl = document.querySelector('meta[name="description"]');
+    if (metaEl) {
+      const m = metaEl.content.match(/([\\d,.]+)\\s*Followers/i);
+      if (m) followers = parseInt(m[1].replace(/[,.]/g, ''));
+    }
+    const h2 = document.querySelector('h2');
+    if (h2) fullName = h2.innerText.trim();
+    const pic = document.querySelector('img[alt*="' + username + '"]') || document.querySelector('header img');
+    if (pic) profilePic = pic.src;
+  } catch(e) {}
+
+  // Extract post shortcodes from DOM
+  const links = [...document.querySelectorAll('a[href*="/p/"]')];
+  const shortcodes = [...new Set(links.map(l => {
+    const m = l.href.match(/\\/p\\/([^/?]+)/);
+    return m ? m[1] : null;
+  }).filter(Boolean))];
+
+  if (shortcodes.length === 0) {
+    alert('No posts found on this page. Make sure you can see the profile grid.');
+    return;
+  }
+
+  console.log('[VT] Found ' + shortcodes.length + ' posts, fetching engagement...');
+
+  const posts = [];
+  for (const sc of shortcodes.slice(0, 30)) {
+    try {
+      const vars = encodeURIComponent(JSON.stringify({ shortcode: sc }));
+      const r = await fetch('https://www.instagram.com/graphql/query/?doc_id=8845758582119845&variables=' + vars, {
+        headers: { 'x-ig-app-id': '936619743392459' }
+      });
+      const d = await r.json();
+      const m = d?.data?.xdt_shortcode_media;
+      if (m) {
+        posts.push({
+          shortcode: sc,
+          likes: m.edge_media_preview_like?.count || m.edge_liked_by?.count || 0,
+          comments: m.edge_media_to_parent_comment?.count || m.edge_media_to_comment?.count || 0,
+          plays: m.video_view_count || m.video_play_count || 0,
+          type: m.__typename || 'Image',
+          thumbnail: m.display_url || m.thumbnail_src || null,
+          caption: m.edge_media_to_caption?.edges?.[0]?.node?.text?.substring(0, 2000) || null,
+          timestamp: m.taken_at_timestamp || null,
+        });
+      }
+      await new Promise(r => setTimeout(r, 300));
+    } catch(e) {
+      console.warn('[VT] Failed shortcode ' + sc, e.message);
+    }
+  }
+
+  if (posts.length === 0) {
+    alert('Could not fetch post data. Make sure you are logged into Instagram.');
+    return;
+  }
+
+  console.log('[VT] Sending ' + posts.length + ' posts to tracker...');
+
+  const resp = await fetch(HOST + '/api/browser-scrape', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, followers_count: followers, full_name: fullName, profile_pic_url: profilePic, posts })
+  });
+  const result = await resp.json();
+
+  if (result.success) {
+    alert('[Viral Tracker] Done! ' + result.postsProcessed + ' posts processed, ' + result.newAlerts + ' new viral alerts.');
+    console.log('[VT] Result:', result);
+  } else {
+    alert('[Viral Tracker] Error: ' + (result.error || 'Unknown error'));
+  }
+})();`;
+
+    document.getElementById('scriptBox').textContent = scriptContent;
+
+    // Build bookmarklet
+    const bookmarklet = 'javascript:' + encodeURIComponent(scriptContent.replace(/\n\s*/g, ' '));
+    document.getElementById('bookmarkletLink').href = bookmarklet;
+
+    function copyScript() {
+      navigator.clipboard.writeText(scriptContent).then(() => {
+        const btn = document.querySelector('.btn');
+        btn.textContent = '✓ COPIED!';
+        setTimeout(() => btn.textContent = '⧉ COPY SCRIPT', 2000);
+      });
+    }
+    window.copyScript = copyScript;
+
+    async function testSubmit() {
+      const username = document.getElementById('username').value.trim();
+      const followers = parseInt(document.getElementById('followers').value) || 0;
+      const status = document.getElementById('status');
+      if (!username) { status.className = 'err'; status.style.display = 'block'; status.textContent = 'Username required'; return; }
+      try {
+        const r = await fetch('/api/browser-scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, followers_count: followers, posts: [] })
+        });
+        const d = await r.json();
+        status.className = d.success ? 'ok' : 'err';
+        status.style.display = 'block';
+        status.textContent = d.error || ('Account registered: @' + d.username);
+      } catch(e) {
+        status.className = 'err';
+        status.style.display = 'block';
+        status.textContent = 'Could not reach tracker at localhost:3000 — is the server running?';
+      }
+    }
+    window.testSubmit = testSubmit;
+  </script>
+</body>
+</html>

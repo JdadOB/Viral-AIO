@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    background: #070A11;
+    color: #C8D6E5;
+    font-family: 'JetBrains Mono', 'Share Tech Mono', monospace;
+  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,242,255,0.3); border-radius: 2px; }
+}
+
+@layer components {
+  .scanlines {
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,242,255,0.012) 2px, rgba(0,242,255,0.012) 4px
+    );
+  }
+
+  .bulkhead {
+    background: rgba(18,24,34,0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);
+    border: 1px solid rgba(0,242,255,0.2);
+  }
+  .bulkhead-sm {
+    clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+  }
+
+  .neon-text-cyan { color: #00F2FF; text-shadow: 0 0 20px rgba(0,242,255,0.5); }
+  .neon-text-red  { color: #FF3E3E; text-shadow: 0 0 16px rgba(255,62,62,0.5); }
+
+  .btn-hud {
+    @apply font-mono text-[9px] tracking-[2px] px-3 py-1.5 border transition-all duration-200;
+    clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+    background: transparent;
+  }
+  .btn-hud-cyan   { @apply btn-hud border-cyan text-cyan hover:bg-cyan/10; }
+  .btn-hud-green  { @apply btn-hud border-ngreen text-ngreen hover:bg-ngreen/10; }
+  .btn-hud-red    { @apply btn-hud border-nred text-nred hover:bg-nred/10; }
+  .btn-hud-pink   { @apply btn-hud border-npink text-npink hover:bg-npink/10; }
+  .btn-hud-dim    { @apply btn-hud border-dim/40 text-dim hover:border-dim hover:text-bright; }
+
+  /* Avatar CSS animations */
+  .walk-leg-l { transform-origin: 50% 0; animation: walkL 0.35s ease-in-out infinite alternate; }
+  .walk-leg-r { transform-origin: 50% 0; animation: walkR 0.35s ease-in-out infinite alternate; }
+  .typing-body { animation: bob 0.5s ease-in-out infinite alternate; }
+
+  /* Room scene floor grid */
+  .room-floor {
+    background-image: linear-gradient(rgba(0,242,255,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,242,255,0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* Corner bracket decorators */
+  .corner-brackets {
+    position: relative;
+  }
+  .corner-brackets::before,
+  .corner-brackets::after {
+    content: '';
+    position: absolute;
+    width: 12px; height: 12px;
+    border-color: #00F2FF;
+    border-style: solid;
+    opacity: 0.6;
+  }
+  .corner-brackets::before { top: 4px; left: 4px; border-width: 1px 0 0 1px; }
+  .corner-brackets::after  { bottom: 4px; right: 4px; border-width: 0 1px 1px 0; }
+}
+
+/* Framer Motion needs these for SVG animations */
+svg .walk-leg-l { transform-origin: center top; animation: walkL 0.35s ease-in-out infinite alternate; }
+svg .walk-leg-r { transform-origin: center top; animation: walkR 0.35s ease-in-out infinite alternate; }

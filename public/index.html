@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VIRAL TRACKER // CREATOR ANALYTICS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="starfield" aria-hidden="true"></canvas>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="noise" aria-hidden="true"></div>
+
+  <div id="app">
+
+    <!-- SIDEBAR: Mission Control -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
+        </div>
+        <div class="logo-text">
+          <span class="logo-title">VIRAL<span class="logo-accent">TRACK</span></span>
+          <span class="logo-sub">INTEL SYS v1.0</span>
+        </div>
+      </div>
+
+      <div class="nav-label">// SECTORS</div>
+      <nav class="nav">
+        <a class="nav-item active" data-page="dashboard" href="#dashboard">
+          <span class="nav-icon">&#9632;</span>
+          <span class="nav-text">INTELLIGENCE HUB</span>
+          <span class="badge" id="unread-badge"></span>
+        </a>
+        <a class="nav-item" data-page="competitors" href="#competitors">
+          <span class="nav-icon">&#9650;</span>
+          <span class="nav-text">CREATOR ROSTER</span>
+          <span class="account-count" id="account-count"></span>
+        </a>
+        <a class="nav-item" data-page="agents" href="#agents">
+          <span class="nav-icon">&#9651;</span>
+          <span class="nav-text">COMMAND CENTER</span>
+        </a>
+        <a class="nav-item" data-page="settings" href="#settings">
+          <span class="nav-icon">&#9670;</span>
+          <span class="nav-text">MISSION CONFIG</span>
+        </a>
+      </nav>
+
+      <div class="nav-label">// OPERATIONS</div>
+      <div class="sidebar-ops">
+        <button id="poll-btn" class="btn-poll">
+          <span class="poll-icon">&#9654;</span>
+          EXECUTE SCAN
+        </button>
+        <div class="poll-status" id="poll-status"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="sys-status">
+          <span class="status-dot active"></span>
+          <span class="status-text">SYSTEM ONLINE</span>
+        </div>
+        <div class="sys-time" id="sys-time"></div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="main">
+      <div id="page-dashboard" class="page"></div>
+      <div id="page-competitors" class="page hidden"></div>
+      <div id="page-agents" class="page hidden"></div>
+      <div id="page-settings" class="page hidden"></div>
+    </main>
+
+  </div>
+
+  <!-- GLOBAL MISSION STATUS BAR -->
+  <footer class="mission-bar">
+    <div class="mission-stat">
+      <span class="ms-label">VIRAL ALERTS</span>
+      <span class="ms-value" id="bar-alerts">0</span>
+    </div>
+    <div class="mission-stat">
+      <span class="ms-label">UNREAD INTEL</span>
+      <span class="ms-value accent-magenta" id="bar-unread">0</span>
+    </div>
+    <div class="mission-stat">
+      <span class="ms-label">MISSIONS ACTED</span>
+      <span class="ms-value accent-green" id="bar-acted">0</span>
+    </div>
+    <div class="mission-stat">
+      <span class="ms-label">BRIEFS GENERATED</span>
+      <span class="ms-value accent-cyan" id="bar-briefs">0</span>
+    </div>
+    <div class="mission-stat">
+      <span class="ms-label">CREATORS TRACKED</span>
+      <span class="ms-value" id="bar-accounts">0</span>
+    </div>
+    <div class="mission-ticker">
+      <span class="ticker-label">&#9608; FEED &gt;&gt;</span>
+      <span class="ticker-text" id="ticker-text">SYSTEM READY // AWAITING SCAN DATA // ADD CREATORS TO BEGIN TRACKING</span>
+    </div>
+  </footer>
+
+  <!-- TOAST ALERT -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- MODAL: Classified Brief -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">// CLASSIFIED INTEL BRIEF</span>
+        <button class="modal-close" id="modal-close">[ CLOSE ]</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
