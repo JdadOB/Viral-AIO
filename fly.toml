@@ -1,5 +1,5 @@
 # fly.toml - Fly.io deployment config
-app = "viral-aio"
+app = "viral-aio-black-frost-9755"
 primary_region = "iad"
 
 [build]
@@ -9,7 +9,7 @@ primary_region = "iad"
   DB_PATH = "/data/tracker.db"
 
 [mounts]
-  source = "viral_aio_data"
+  source = "app_data"
   destination = "/data"
 
 [http_service]
