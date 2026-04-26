@@ -322,6 +322,12 @@ app.post('/api/accounts', requireManager, async (req, res) => {
   const { username, group_name } = req.body;
   if (!username) return res.status(400).json({ error: 'username required' });
 
+  // Managers capped at 10 tracked creators per workspace
+  if (userRole(req.user) === 'manager') {
+    const { count } = db.prepare('SELECT COUNT(*) as count FROM accounts WHERE user_id = ?').get(req.scopedUserId);
+    if (count >= 10) return res.status(403).json({ error: 'Creator limit reached — managers can track a maximum of 10 creators.' });
+  }
+
   const clean = username.replace('@', '').toLowerCase().trim();
   const exists = db.prepare('SELECT id FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.scopedUserId);
   if (exists) return res.status(409).json({ error: 'Account already tracked' });
