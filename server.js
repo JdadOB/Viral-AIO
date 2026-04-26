@@ -589,6 +589,49 @@ app.post('/api/brain/build', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/brain/search', requireAuth, async (req, res) => {
+  const { query } = req.body;
+  if (!query || !query.trim()) return res.status(400).json({ error: 'Query required' });
+
+  const profiles = db.prepare(`
+    SELECT cp.*, a.username, a.full_name, a.followers_count, a.profile_pic_url, a.group_name
+    FROM creator_profiles cp
+    JOIN accounts a ON cp.account_id = a.id
+    WHERE cp.user_id = ?
+  `).all(req.user.id);
+
+  if (!profiles.length) return res.json({ results: [] });
+
+  const Anthropic = require('@anthropic-ai/sdk');
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  const profileList = profiles.map((p, i) =>
+    `[${i + 1}] @${p.username}\n  Voice: ${p.voice_fingerprint || '—'}\n  Pillars: ${p.content_pillars || '—'}\n  Audience Triggers: ${p.audience_triggers || '—'}\n  Niche: ${p.niche_positioning || '—'}\n  Visual Style: ${p.visual_style || '—'}\n  Strength: ${p.strength_summary || '—'}`
+  ).join('\n\n');
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: `You are ranking creator profiles by relevance to a search query.\n\nSearch query: "${query.trim()}"\n\nCreator profiles:\n${profileList}\n\nReturn ONLY a JSON array of matches ordered by relevance (most relevant first). Only include profiles that are genuinely relevant. Max 10 results. Format:\n[{"index": <number>, "reason": "<one short sentence why this matches>"}]`
+    }]
+  });
+
+  try {
+    const text = response.content[0].text;
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return res.json({ results: [] });
+    const ranking = JSON.parse(jsonMatch[0]);
+    const results = ranking
+      .map(r => r.index >= 1 && r.index <= profiles.length ? { ...profiles[r.index - 1], relevance_reason: r.reason } : null)
+      .filter(Boolean);
+    res.json({ results, query: query.trim() });
+  } catch {
+    res.json({ results: [] });
+  }
+});
+
 app.get('/api/agents/history', requireAuth, (req, res) => {
   const { agent } = req.query;
   const uid = req.user.id;
