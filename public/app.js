@@ -1606,6 +1606,6 @@ fetch('/api/me').then(r => r.json()).then(user => {
   if (el && user.name) el.textContent = user.name;
   if (user.is_admin) {
     const navAdmin = document.getElementById('nav-admin');
-    if (navAdmin) navAdmin.classList.remove('hidden');
+    if (navAdmin) navAdmin.style.display = '';
   }
 }).catch(() => {});
