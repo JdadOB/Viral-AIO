@@ -1023,8 +1023,6 @@ const AGENT_DEF = {
   strategist: { label: 'The Strategist', role: 'Viral Performance Reports',   icon: 'S', color: '#32ADE6', bg: 'rgba(50,173,230,0.12)' },
   writer:     { label: 'The Writer',     role: 'Caption Generator',           icon: 'W', color: '#30D158', bg: 'rgba(48,209,88,0.12)' },
   assistant:  { label: 'The Assistant',  role: 'Research & Intelligence',     icon: 'A', color: '#FF375F', bg: 'rgba(255,55,95,0.12)' },
-  researcher: { label: 'The Researcher', role: 'Instagram Trend Analysis',    icon: 'R', color: '#FF9F0A', bg: 'rgba(255,159,10,0.12)' },
-  organizer:  { label: 'The Organizer',  role: 'Brief Compiler & Reel Ideas', icon: 'O', color: '#BF5AF2', bg: 'rgba(191,90,242,0.12)' },
   ideator:    { label: 'The Ideator',    role: 'Reel & TikTok Idea Generator',icon: 'I', color: '#FF6B6B', bg: 'rgba(255,107,107,0.12)' },
 };
 
@@ -1173,48 +1171,6 @@ async function renderAgents() {
             placeholder="Ask anything: strategy questions, competitor analysis, why a post went viral, hashtag research..."></textarea>
           <button class="btn btn-accent" id="assistant-run-btn" style="width:100%;margin-top:10px;background:var(--magenta);border-color:var(--magenta)">Ask Assistant</button>
           <div class="agent-output-panel" id="assistant-output"></div>
-        </div>
-      </div>
-
-      <!-- RESEARCHER -->
-      <div class="agent-card" id="agent-researcher">
-        <div class="agent-header">
-          <div class="agent-icon" style="--icon-color:${AGENT_DEF.researcher.color};--icon-bg:${AGENT_DEF.researcher.bg}">R</div>
-          <div class="agent-meta">
-            <div class="agent-name">${AGENT_DEF.researcher.label}</div>
-            <div class="agent-role">${AGENT_DEF.researcher.role}</div>
-          </div>
-          <div class="agent-status idle" id="researcher-status" title="Status"></div>
-        </div>
-        <div class="agent-body">
-          <label>Niche or Topic</label>
-          <input class="agent-input" id="researcher-niche" type="text" placeholder="e.g. fitness, fashion, luxury cars, cooking...">
-          <label>Focus on Creator (optional)</label>
-          <select class="agent-select" id="researcher-username">
-            <option value="">— All tracked accounts —</option>
-            ${accounts.map(a => `<option value="${a.username}">@${a.username}</option>`).join('')}
-          </select>
-          <button class="btn btn-accent" id="researcher-run-btn" style="width:100%;margin-top:10px;background:var(--orange);border-color:var(--orange)">Run Research</button>
-          <div class="agent-output-panel" id="researcher-output"></div>
-        </div>
-      </div>
-
-      <!-- ORGANIZER -->
-      <div class="agent-card" id="agent-organizer">
-        <div class="agent-header">
-          <div class="agent-icon" style="--icon-color:${AGENT_DEF.organizer.color};--icon-bg:${AGENT_DEF.organizer.bg}">O</div>
-          <div class="agent-meta">
-            <div class="agent-name">${AGENT_DEF.organizer.label}</div>
-            <div class="agent-role">${AGENT_DEF.organizer.role}</div>
-          </div>
-          <div class="agent-status idle" id="organizer-status" title="Status"></div>
-        </div>
-        <div class="agent-body">
-          <p>Pulls the latest Researcher and Strategist outputs from the database and compiles them into a master brief with 10 ready-to-film reel ideas.</p>
-          <label>Extra Context (optional)</label>
-          <input class="agent-input" id="organizer-context" type="text" placeholder="e.g. launching a new product, targeting Gen Z...">
-          <button class="btn btn-accent" id="organizer-run-btn" style="width:100%;margin-top:10px;background:var(--purple);border-color:var(--purple)">Compile Brief</button>
-          <div class="agent-output-panel" id="organizer-output"></div>
         </div>
       </div>
 
@@ -1379,52 +1335,6 @@ function wireAgentButtons() {
     } finally {
       btn.disabled = false;
       btn.textContent = 'Ask Assistant';
-    }
-  });
-
-  // RESEARCHER
-  $('#researcher-run-btn').addEventListener('click', async () => {
-    const niche = $('#researcher-niche').value.trim();
-    if (!niche) return toast('Enter a niche or topic first', 'error');
-    const username = $('#researcher-username').value || null;
-    const btn = $('#researcher-run-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Researching...';
-    setAgentStatus('researcher', 'running');
-    try {
-      const result = await api('/api/agents/researcher', { method: 'POST', body: { niche, username } });
-      setAgentStatus('researcher', 'done');
-      showAgentOutput('researcher-output', result.reviewed);
-      toast('Trend research ready', 'success');
-      loadAgentHistory();
-    } catch (err) {
-      setAgentStatus('researcher', 'idle');
-      toast(err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Run Research';
-    }
-  });
-
-  // ORGANIZER
-  $('#organizer-run-btn').addEventListener('click', async () => {
-    const context = $('#organizer-context').value.trim() || null;
-    const btn = $('#organizer-run-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Compiling...';
-    setAgentStatus('organizer', 'running');
-    try {
-      const result = await api('/api/agents/organizer', { method: 'POST', body: { context } });
-      setAgentStatus('organizer', 'done');
-      showAgentOutput('organizer-output', result.reviewed);
-      toast('Master brief ready', 'success');
-      loadAgentHistory();
-    } catch (err) {
-      setAgentStatus('organizer', 'idle');
-      toast(err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Compile Brief';
     }
   });
 

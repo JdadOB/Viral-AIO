@@ -61,7 +61,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOrganizer, runIdeator } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -531,29 +531,6 @@ app.post('/api/agents/captain', requireAuth, async (req, res) => {
     res.json({ ...captain, id: outputId });
   } catch (err) {
     console.error('[Agent:Captain]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/agents/researcher', requireAuth, async (req, res) => {
-  try {
-    const { niche, username } = req.body;
-    if (!niche) return res.status(400).json({ error: 'niche required' });
-    const result = await runResearcher({ niche, username: username || null, userId: req.user.id });
-    res.json(result);
-  } catch (err) {
-    console.error('[Agent:Researcher]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/agents/organizer', requireAuth, async (req, res) => {
-  try {
-    const { context } = req.body;
-    const result = await runOrganizer({ context: context || null, userId: req.user.id });
-    res.json(result);
-  } catch (err) {
-    console.error('[Agent:Organizer]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
