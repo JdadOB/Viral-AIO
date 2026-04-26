@@ -2200,7 +2200,7 @@ async function adminDeleteUser(id, name) {
 
 // ── Messages (Chat) ───────────────────────────────────────────────────────────
 
-let chatState = { roomId: null, lastId: 0, pollTimer: null };
+let chatState = { roomId: null, lastId: 0, pollTimer: null, sidebarTimer: null };
 
 function renderMessages() {
   const pg = $('#page-messages');
@@ -2221,6 +2221,12 @@ function renderMessages() {
       </div>
     </div>`;
   loadChatRooms();
+  // Keep sidebar unread counts fresh even when no room is open
+  if (chatState.sidebarTimer) clearInterval(chatState.sidebarTimer);
+  chatState.sidebarTimer = setInterval(() => {
+    if (currentPage !== 'messages') { clearInterval(chatState.sidebarTimer); chatState.sidebarTimer = null; return; }
+    if (!chatState.roomId) { loadChatRooms(); updateChatBadge(); }
+  }, 3000);
 }
 
 async function loadChatRooms() {
@@ -2309,9 +2315,15 @@ async function openRoom(peerId, peerName) {
 
 async function loadMessages(roomId, since = 0) {
   try {
-    const msgs = await fetch(`/api/chat/rooms/${roomId}/messages?since=${since}`).then(r => r.json());
+    const res  = await fetch(`/api/chat/rooms/${roomId}/messages?since=${since}`);
+    const msgs = await res.json();
     const container = $('#chat-messages');
     if (!container) return;
+
+    if (!Array.isArray(msgs)) {
+      if (since === 0) container.innerHTML = '<div class="chat-no-msgs">Could not load messages.</div>';
+      return;
+    }
 
     if (since === 0) container.innerHTML = '';
     if (!msgs.length) {
@@ -2335,7 +2347,7 @@ async function loadMessages(roomId, since = 0) {
     }
     chatState.lastId = msgs[msgs.length - 1].id;
     container.scrollTop = container.scrollHeight;
-  } catch { /* ignore */ }
+  } catch { /* network error — silently skip */ }
 }
 
 function escapeHtml(s) {
@@ -2349,11 +2361,17 @@ async function sendChatMessage() {
   input.value = '';
   input.style.height = '';
   try {
-    await fetch(`/api/chat/rooms/${chatState.roomId}/messages`, {
+    const res  = await fetch(`/api/chat/rooms/${chatState.roomId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to send' }));
+      toast(err.error || 'Failed to send', 'error');
+      input.value = body;
+      return;
+    }
     await loadMessages(chatState.roomId, chatState.lastId);
     loadChatRooms();
   } catch (e) { toast(e.message, 'error'); }
@@ -2364,6 +2382,7 @@ function startChatPoller(roomId) {
   chatState.pollTimer = setInterval(async () => {
     if (currentPage !== 'messages' || chatState.roomId !== roomId) return stopChatPoller();
     await loadMessages(roomId, chatState.lastId);
+    loadChatRooms();
     updateChatBadge();
   }, 3000);
 }
