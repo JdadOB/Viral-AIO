@@ -1,25 +1,30 @@
-# fly.toml - Fly.io deployment config
-app = "viral-aio"
-primary_region = "iad"
+# fly.toml app configuration file generated for viral-aio on 2026-04-26T04:32:58Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'viral-aio'
+primary_region = 'dfw'
 
 [build]
 
 [env]
-  PORT = "3000"
-  DB_PATH = "/data/tracker.db"
+  DB_PATH = '/data/tracker.db'
+  PORT = '3000'
 
-[mounts]
-  source = "viral_aio_data"
-  destination = "/data"
+[[mounts]]
+  source = 'viral_aio_data'
+  destination = '/data'
 
 [http_service]
-  internal_port = 3000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
