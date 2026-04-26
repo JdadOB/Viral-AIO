@@ -797,6 +797,202 @@ app.get('/api/agents/history', requireAuth, (req, res) => {
   res.json(rows);
 });
 
+// ── Chat routes ───────────────────────────────────────────────────────────────
+
+// Users I'm allowed to DM
+app.get('/api/chat/peers', requireAuth, (req, res) => {
+  const uid  = req.user.id;
+  const role = userRole(req.user);
+  let peers;
+  if (role === 'admin') {
+    peers = db.prepare("SELECT id, name, role FROM users WHERE id != ? ORDER BY name ASC").all(uid);
+  } else if (role === 'manager') {
+    peers = db.prepare(`SELECT u.id, u.name, u.role FROM manager_clients mc
+      JOIN users u ON u.id = mc.client_id WHERE mc.manager_id = ? ORDER BY u.name ASC`).all(uid);
+  } else {
+    peers = db.prepare(`SELECT u.id, u.name, u.role FROM manager_clients mc
+      JOIN users u ON u.id = mc.manager_id WHERE mc.client_id = ? ORDER BY u.name ASC`).all(uid);
+  }
+  res.json(peers);
+});
+
+// List rooms for the current user, with unread counts
+app.get('/api/chat/rooms', requireAuth, (req, res) => {
+  const uid = req.user.id;
+  const rooms = db.prepare(`
+    SELECT cr.id,
+      u.id AS peer_id, u.name AS peer_name, u.role AS peer_role,
+      (SELECT body FROM messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1) AS last_message,
+      (SELECT created_at FROM messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1) AS last_message_at,
+      (SELECT COUNT(*) FROM messages
+        WHERE room_id = cr.id AND sender_id != ?
+          AND id > COALESCE((SELECT last_read_id FROM room_reads WHERE room_id = cr.id AND user_id = ?), 0)
+      ) AS unread_count
+    FROM chat_rooms cr
+    JOIN chat_room_members m1 ON m1.room_id = cr.id AND m1.user_id = ?
+    JOIN chat_room_members m2 ON m2.room_id = cr.id AND m2.user_id != ?
+    JOIN users u ON u.id = m2.user_id
+    ORDER BY last_message_at DESC
+  `).all(uid, uid, uid, uid);
+  res.json(rooms);
+});
+
+// Get or create DM room with a peer
+app.post('/api/chat/rooms', requireAuth, (req, res) => {
+  const uid    = req.user.id;
+  const peerId = parseInt(req.body.peerId);
+  if (!peerId) return res.status(400).json({ error: 'peerId required' });
+
+  const role = userRole(req.user);
+  if (role !== 'admin') {
+    if (role === 'manager') {
+      const link = db.prepare('SELECT 1 FROM manager_clients WHERE manager_id = ? AND client_id = ?').get(uid, peerId);
+      if (!link) return res.status(403).json({ error: 'Not authorized' });
+    } else {
+      const link = db.prepare('SELECT 1 FROM manager_clients WHERE manager_id = ? AND client_id = ?').get(peerId, uid);
+      if (!link) return res.status(403).json({ error: 'Not authorized' });
+    }
+  }
+
+  const existing = db.prepare(`
+    SELECT cr.id FROM chat_rooms cr
+    JOIN chat_room_members m1 ON m1.room_id = cr.id AND m1.user_id = ?
+    JOIN chat_room_members m2 ON m2.room_id = cr.id AND m2.user_id = ?
+    WHERE (SELECT COUNT(*) FROM chat_room_members WHERE room_id = cr.id) = 2
+  `).get(uid, peerId);
+  if (existing) return res.json({ roomId: existing.id });
+
+  const { lastInsertRowid: roomId } = db.prepare('INSERT INTO chat_rooms DEFAULT VALUES').run();
+  db.prepare('INSERT INTO chat_room_members (room_id, user_id) VALUES (?, ?)').run(roomId, uid);
+  db.prepare('INSERT INTO chat_room_members (room_id, user_id) VALUES (?, ?)').run(roomId, peerId);
+  res.json({ roomId });
+});
+
+// Get messages (supports ?since=<lastId> for polling)
+app.get('/api/chat/rooms/:roomId/messages', requireAuth, (req, res) => {
+  const uid    = req.user.id;
+  const roomId = parseInt(req.params.roomId);
+  if (!db.prepare('SELECT 1 FROM chat_room_members WHERE room_id = ? AND user_id = ?').get(roomId, uid))
+    return res.status(404).json({ error: 'Not found' });
+
+  const since = parseInt(req.query.since) || 0;
+  const msgs  = db.prepare(`
+    SELECT m.id, m.sender_id, m.body, m.created_at, u.name AS sender_name
+    FROM messages m JOIN users u ON u.id = m.sender_id
+    WHERE m.room_id = ? AND m.id > ?
+    ORDER BY m.id ASC LIMIT 100
+  `).all(roomId, since);
+
+  if (msgs.length) {
+    const lastId = msgs[msgs.length - 1].id;
+    db.prepare('INSERT OR REPLACE INTO room_reads (room_id, user_id, last_read_id) VALUES (?, ?, ?)').run(roomId, uid, lastId);
+  }
+  res.json(msgs);
+});
+
+// Send a message
+app.post('/api/chat/rooms/:roomId/messages', requireAuth, (req, res) => {
+  const uid    = req.user.id;
+  const roomId = parseInt(req.params.roomId);
+  if (!db.prepare('SELECT 1 FROM chat_room_members WHERE room_id = ? AND user_id = ?').get(roomId, uid))
+    return res.status(404).json({ error: 'Not found' });
+  const body = (req.body.body || '').trim();
+  if (!body) return res.status(400).json({ error: 'Message cannot be empty' });
+
+  const { lastInsertRowid: msgId } = db.prepare(
+    'INSERT INTO messages (room_id, sender_id, body) VALUES (?, ?, ?)'
+  ).run(roomId, uid, body);
+  db.prepare('INSERT OR REPLACE INTO room_reads (room_id, user_id, last_read_id) VALUES (?, ?, ?)').run(roomId, uid, msgId);
+
+  const msg = db.prepare(`
+    SELECT m.id, m.sender_id, m.body, m.created_at, u.name AS sender_name
+    FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.id = ?
+  `).get(msgId);
+  res.json(msg);
+});
+
+// Total unread across all rooms (for nav badge)
+app.get('/api/chat/unread', requireAuth, (req, res) => {
+  const uid = req.user.id;
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(
+      (SELECT COUNT(*) FROM messages
+        WHERE room_id = cr.id AND sender_id != ?
+          AND id > COALESCE((SELECT last_read_id FROM room_reads WHERE room_id = cr.id AND user_id = ?), 0))
+    ), 0) AS total
+    FROM chat_rooms cr
+    JOIN chat_room_members m ON m.room_id = cr.id AND m.user_id = ?
+  `).get(uid, uid, uid);
+  res.json({ unread: row.total });
+});
+
+// ── Content Hub routes ────────────────────────────────────────────────────────
+
+app.get('/api/content', requireAuth, (req, res) => {
+  const uid  = req.user.id;
+  const role = userRole(req.user);
+  let items;
+  if (role === 'admin') {
+    items = db.prepare(`SELECT ci.*, uc.name AS creator_name, ucl.name AS client_name
+      FROM content_items ci JOIN users uc ON uc.id = ci.creator_id JOIN users ucl ON ucl.id = ci.client_id
+      ORDER BY ci.created_at DESC`).all();
+  } else if (role === 'manager') {
+    items = db.prepare(`SELECT ci.*, uc.name AS creator_name, ucl.name AS client_name
+      FROM content_items ci JOIN users uc ON uc.id = ci.creator_id JOIN users ucl ON ucl.id = ci.client_id
+      WHERE ci.creator_id = ?
+      ORDER BY ci.created_at DESC`).all(uid);
+  } else {
+    items = db.prepare(`SELECT ci.*, uc.name AS creator_name, ucl.name AS client_name
+      FROM content_items ci JOIN users uc ON uc.id = ci.creator_id JOIN users ucl ON ucl.id = ci.client_id
+      WHERE ci.client_id = ?
+      ORDER BY ci.created_at DESC`).all(uid);
+  }
+  res.json(items);
+});
+
+app.post('/api/content', requireManager, (req, res) => {
+  const { clientId, type, title, body, platform } = req.body;
+  if (!clientId || !title?.trim()) return res.status(400).json({ error: 'clientId and title required' });
+  if (!['idea', 'report'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
+
+  const uid  = req.user.id;
+  const role = userRole(req.user);
+  if (role === 'manager') {
+    const link = db.prepare('SELECT 1 FROM manager_clients WHERE manager_id = ? AND client_id = ?').get(uid, parseInt(clientId));
+    if (!link) return res.status(403).json({ error: 'Not authorized for this client' });
+  }
+
+  const { lastInsertRowid: id } = db.prepare(
+    'INSERT INTO content_items (creator_id, client_id, type, title, body, platform) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(uid, parseInt(clientId), type, title.trim(), body || '', platform || '');
+  logActivity(uid, req.user.name, role, 'content_created', { type, title: title.trim(), clientId });
+  res.json({ success: true, id });
+});
+
+app.patch('/api/content/:id', requireManager, (req, res) => {
+  const uid  = req.user.id;
+  const role = userRole(req.user);
+  const item = role === 'admin'
+    ? db.prepare('SELECT * FROM content_items WHERE id = ?').get(parseInt(req.params.id))
+    : db.prepare('SELECT * FROM content_items WHERE id = ? AND creator_id = ?').get(parseInt(req.params.id), uid);
+  if (!item) return res.status(404).json({ error: 'Not found' });
+  const { title, body, platform } = req.body;
+  db.prepare('UPDATE content_items SET title = ?, body = ?, platform = ? WHERE id = ?')
+    .run(title ?? item.title, body ?? item.body, platform ?? item.platform, item.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/content/:id', requireManager, (req, res) => {
+  const uid  = req.user.id;
+  const role = userRole(req.user);
+  const item = role === 'admin'
+    ? db.prepare('SELECT id FROM content_items WHERE id = ?').get(parseInt(req.params.id))
+    : db.prepare('SELECT id FROM content_items WHERE id = ? AND creator_id = ?').get(parseInt(req.params.id), uid);
+  if (!item) return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM content_items WHERE id = ?').run(item.id);
+  res.json({ success: true });
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3000;

@@ -204,6 +204,48 @@ db.exec(`
 `);
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired)'); } catch (e) {}
 
+// ── Chat + Content tables ─────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_room_members (
+    room_id INTEGER NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (room_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS room_reads (
+    room_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS content_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type    TEXT NOT NULL DEFAULT 'idea',
+    title   TEXT NOT NULL,
+    body    TEXT,
+    platform TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, id)'); } catch (e) {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_content_client ON content_items(client_id)'); } catch (e) {}
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',
