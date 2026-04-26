@@ -339,7 +339,8 @@ function alertCardHTML(a) {
 
 function briefHTML(brief) {
   if (!brief) return '';
-  const s = brief.sections || {};
+  // Support both new flat JSON shape and legacy { sections, raw } shape
+  const s = brief.hookAnalysis ? brief : (brief.sections || {});
   const sections = [
     { key: 'hookAnalysis',        label: 'Hook Analysis' },
     { key: 'formatBlueprint',     label: 'Format Blueprint' },

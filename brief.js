@@ -5,6 +5,19 @@ function getClient() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
+const SYSTEM_PROMPT = `You are an expert social media strategist. You must respond with ONLY valid JSON — no markdown, no prose, no code fences. The JSON must exactly match this schema:
+
+{
+  "hookAnalysis": "string",
+  "formatBlueprint": "string",
+  "captionFramework": "string",
+  "hashtagStrategy": "string",
+  "postingWindow": "string",
+  "differentiationTips": "string"
+}
+
+Each value is a detailed, actionable paragraph or formatted block of text. Do not nest objects or arrays inside the values.`;
+
 async function generateBrief(alertId) {
   const row = db.prepare(`
     SELECT
@@ -25,71 +38,64 @@ async function generateBrief(alertId) {
     try { return JSON.parse(existing.content); } catch { /* re-generate if corrupt */ }
   }
 
-  const client = getClient();
+  const viewMetric = row.plays_count > 0
+    ? ` | Plays/Views: ${(row.plays_count).toLocaleString()}`
+    : '';
 
-  const prompt = `You are an expert social media strategist. Analyze this viral Instagram post and produce a clear, actionable content brief a creator can hand directly to their team.
+  const prompt = `Analyze this viral social media post and produce a clear, actionable content brief a creator can hand directly to their team.
 
 VIRAL POST DATA
 - Account: @${row.username}${row.full_name ? ` (${row.full_name})` : ''} — ${(row.followers_count || 0).toLocaleString()} followers
 - Post Type: ${row.post_type}
-- Likes: ${(row.likes_count || 0).toLocaleString()} | Comments: ${(row.comments_count || 0).toLocaleString()}${row.plays_count > 0 ? ` | Plays: ${(row.plays_count || 0).toLocaleString()}` : ''}
+- Likes: ${(row.likes_count || 0).toLocaleString()} | Comments: ${(row.comments_count || 0).toLocaleString()}${viewMetric}
 - Engagement Rate: ${(row.engagement_rate || 0).toFixed(2)}% (account avg: ${(row.account_avg_rate || 0).toFixed(2)}%, multiplier: ${(row.multiplier || 0).toFixed(1)}x)
 - Posted: ${row.posted_at ? new Date(row.posted_at).toDateString() : 'Unknown'}
 - URL: ${row.post_url || 'N/A'}
 - Caption: ${row.caption || 'No caption'}
 
-Write the brief with exactly these six sections. Be specific and direct — no vague advice.
+Fill every key in the JSON schema:
 
-## HOOK ANALYSIS
-What made someone stop scrolling? Name the exact technique (visual contrast, bold text, emotional trigger, trending audio, etc.) and why it worked for this account's audience.
+hookAnalysis — What made someone stop scrolling? Name the exact technique (visual contrast, bold text, emotional trigger, trending audio, etc.) and why it worked for this account's audience.
 
-## FORMAT BLUEPRINT
-Exact format specs: duration (if Reel), aspect ratio, text overlay style, pacing, B-roll or talking head, editing style. What must be replicated to get the same stop-scroll effect.
+formatBlueprint — Exact format specs: duration (if Reel/TikTok), aspect ratio, text overlay style, pacing, B-roll or talking head, editing style. What must be replicated to get the same stop-scroll effect.
 
-## CAPTION FRAMEWORK
-Opening line template they can fill in, body structure (1-3 sentences max), CTA wording, tone, and ideal character count range.
+captionFramework — Opening line template they can fill in, body structure (1-3 sentences max), CTA wording, tone, and ideal character count range.
 
-## HASHTAG STRATEGY
-List 20-25 hashtags: 5 niche (under 500k posts), 10 mid-size (500k–5M), 5 broad (5M+), and 5 account-specific or topic-specific. Format as a ready-to-paste block.
+hashtagStrategy — 20-25 hashtags: 5 niche (under 500k posts), 10 mid-size (500k–5M), 5 broad (5M+), 5 account/topic-specific. Format as a ready-to-paste block.
 
-## POSTING WINDOW
-Best 2-3 day/time windows for this content type, with reasoning based on engagement patterns for this niche.
+postingWindow — Best 2-3 day/time windows for this content type, with reasoning based on engagement patterns for this niche.
 
-## DIFFERENTIATION TIPS
-3 specific, concrete ways to recreate this format with a unique angle — so the post is inspired, not derivative.`;
+differentiationTips — 3 specific, concrete ways to recreate this format with a unique angle so the post is inspired, not derivative.`;
 
+  const client = getClient();
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 1800,
+    system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: prompt }],
   });
 
   const raw = message.content?.[0]?.text;
   if (!raw) throw new Error('Empty response from Claude API');
-  const sections = parseSections(raw);
-  const stored = JSON.stringify({ raw, sections });
 
+  let sections;
+  try {
+    sections = JSON.parse(raw);
+  } catch {
+    sections = {
+      hookAnalysis: raw,
+      formatBlueprint: '',
+      captionFramework: '',
+      hashtagStrategy: '',
+      postingWindow: '',
+      differentiationTips: '',
+    };
+  }
+
+  const stored = JSON.stringify(sections);
   db.prepare('INSERT OR REPLACE INTO briefs (alert_id, content) VALUES (?, ?)').run(alertId, stored);
 
-  return { raw, sections };
-}
-
-function parseSections(text) {
-  const keys = [
-    ['hookAnalysis',        /##\s*HOOK ANALYSIS\s*([\s\S]*?)(?=##|$)/i],
-    ['formatBlueprint',     /##\s*FORMAT BLUEPRINT\s*([\s\S]*?)(?=##|$)/i],
-    ['captionFramework',    /##\s*CAPTION FRAMEWORK\s*([\s\S]*?)(?=##|$)/i],
-    ['hashtagStrategy',     /##\s*HASHTAG STRATEGY\s*([\s\S]*?)(?=##|$)/i],
-    ['postingWindow',       /##\s*POSTING WINDOW\s*([\s\S]*?)(?=##|$)/i],
-    ['differentiationTips', /##\s*DIFFERENTIATION TIPS\s*([\s\S]*?)(?=##|$)/i],
-  ];
-
-  const out = {};
-  for (const [key, re] of keys) {
-    const m = text.match(re);
-    out[key] = m ? m[1].trim() : '';
-  }
-  return out;
+  return sections;
 }
 
 module.exports = { generateBrief };
