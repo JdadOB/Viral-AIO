@@ -136,6 +136,15 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid TEXT PRIMARY KEY,
+    sess TEXT NOT NULL,
+    expired INTEGER NOT NULL
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired)'); } catch (e) {}
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',

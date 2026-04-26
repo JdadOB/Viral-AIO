@@ -17,11 +17,46 @@ const path    = require('path');
 const https   = require('https');
 const http    = require('http');
 const session = require('express-session');
-const MemoryStore = require('memorystore')(session);
 const bcrypt  = require('bcryptjs');
 const passport = require('./auth');
 
 const { db, getSetting, setSetting, getUserSetting, setUserSetting, seedUserDefaults } = require('./db');
+
+class SQLiteStore extends session.Store {
+  get(sid, cb) {
+    try {
+      const row = db.prepare('SELECT sess, expired FROM sessions WHERE sid = ?').get(sid);
+      if (!row) return cb(null, null);
+      if (Date.now() > row.expired) {
+        db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+        return cb(null, null);
+      }
+      cb(null, JSON.parse(row.sess));
+    } catch (e) { cb(e); }
+  }
+  set(sid, sess, cb) {
+    try {
+      const ttl = sess.cookie?.maxAge ?? 7 * 24 * 60 * 60 * 1000;
+      const expired = Date.now() + ttl;
+      db.prepare('INSERT OR REPLACE INTO sessions (sid, sess, expired) VALUES (?, ?, ?)').run(sid, JSON.stringify(sess), expired);
+      cb(null);
+    } catch (e) { cb(e); }
+  }
+  destroy(sid, cb) {
+    try {
+      db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+      cb(null);
+    } catch (e) { cb(e); }
+  }
+  touch(sid, sess, cb) {
+    try {
+      const ttl = sess.cookie?.maxAge ?? 7 * 24 * 60 * 60 * 1000;
+      const expired = Date.now() + ttl;
+      db.prepare('UPDATE sessions SET expired = ? WHERE sid = ?').run(expired, sid);
+      cb(null);
+    } catch (e) { cb(e); }
+  }
+}
 const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
@@ -36,7 +71,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'viral-track-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
-  store: new MemoryStore({ checkPeriod: 86400000 }),
+  store: new SQLiteStore(),
   cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 },
 }));
 app.use(passport.initialize());
