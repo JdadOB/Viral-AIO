@@ -107,6 +107,7 @@ let currentPage = 'dashboard';
 function navigate(page) {
   if (!pages.includes(page)) page = 'dashboard';
   if (page === 'admin' && !(currentUser && currentUser.is_admin)) page = 'dashboard';
+  if (currentPage === 'brain' && page !== 'brain') disposeBrainScene();
   currentPage = page;
   pages.forEach(p => {
     const el = $(`#page-${p}`);
@@ -1393,25 +1394,251 @@ function wireAgentButtons() {
   });
 }
 
+// ── Brain 3D Engine ───────────────────────────────────────────────────────────
+
+let _brainScene = null, _brainRenderer = null, _brainAnimId = null, _brainCamera = null;
+let _brainNodeMeshes = [];
+
+function disposeBrainScene() {
+  if (_brainAnimId) { cancelAnimationFrame(_brainAnimId); _brainAnimId = null; }
+  if (_brainRenderer) {
+    _brainRenderer.domElement.removeEventListener('click', _brainClickHandler);
+    _brainRenderer.dispose();
+    _brainRenderer = null;
+  }
+  _brainScene = null;
+  _brainCamera = null;
+  _brainNodeMeshes = [];
+}
+
+function _brainClickHandler(e) {
+  if (!_brainRenderer || !_brainCamera || !_brainNodeMeshes.length) return;
+  const canvas = _brainRenderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(mouse, _brainCamera);
+  const hits = ray.intersectObjects(_brainNodeMeshes.map(n => n.mesh));
+  if (hits.length) {
+    const node = _brainNodeMeshes.find(n => n.mesh === hits[0].object);
+    if (node) showBrainNodeProfile(node.profile);
+  }
+}
+
+function showBrainNodeProfile(profile) {
+  const panel = document.getElementById('brain-profile-panel');
+  const content = document.getElementById('brain-panel-content');
+  if (!panel || !content) return;
+  const pillars = (() => { try { return JSON.parse(profile.content_pillars); } catch { return []; } })();
+  content.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <div style="width:48px;height:48px;border-radius:50%;background:var(--bg-3);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--accent);flex-shrink:0">
+        ${initials(profile.full_name || profile.username)}
+      </div>
+      <div style="min-width:0">
+        <div style="font-weight:700;font-size:16px;color:var(--text-main)">@${profile.username}</div>
+        <div style="font-size:12px;color:var(--text-dim)">${(profile.followers_count || 0).toLocaleString()} followers · ${profile.group_name || 'Default'}</div>
+      </div>
+    </div>
+    ${profile.strength_summary ? `<div class="brain-strength" style="margin-bottom:16px">${profile.strength_summary}</div>` : ''}
+    ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${pillars.map(t => `<span class="brain-pillar">${t}</span>`).join('')}</div>` : ''}
+    <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${profile.voice_fingerprint || '—'}</div></div>
+    <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${profile.audience_triggers || '—'}</div></div>
+    <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${profile.niche_positioning || '—'}</div></div>
+    <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${profile.visual_style || '—'}</div></div>
+    ${profile.discovery_brief ? `<details class="brain-discovery" style="margin-top:12px"><summary>Find Similar</summary><div class="brain-value" style="margin-top:8px">${profile.discovery_brief}</div></details>` : ''}
+    <div style="display:flex;gap:8px;margin-top:20px">
+      <button class="btn" style="flex:1;font-size:12px;background:var(--bg-3);border-color:var(--border-strong);color:var(--text-sub)" onclick="rebuildProfile(${profile.account_id})">Rebuild</button>
+      <button class="btn btn-danger" style="flex:1;font-size:12px" onclick="removeProfile(${profile.account_id},'${profile.username}')">Remove</button>
+    </div>
+  `;
+  panel.style.transform = 'translateX(0)';
+}
+
+function initBrain3D(profiles) {
+  const container = document.getElementById('brain-3d-container');
+  const canvas = document.getElementById('brain-canvas');
+  if (!container || !canvas || typeof THREE === 'undefined') return;
+
+  disposeBrainScene();
+
+  const W = container.clientWidth || 800;
+  const H = container.clientHeight || 520;
+
+  _brainScene = new THREE.Scene();
+  _brainCamera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
+  _brainCamera.position.set(0, 0.4, 6.5);
+
+  _brainRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  _brainRenderer.setSize(W, H);
+  _brainRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  _brainRenderer.setClearColor(0x000000, 0);
+
+  // Lighting
+  _brainScene.add(new THREE.AmbientLight(0x223355, 1.2));
+  const pl1 = new THREE.PointLight(0x6366F1, 3, 20);
+  pl1.position.set(-3, 4, 3);
+  _brainScene.add(pl1);
+  const pl2 = new THREE.PointLight(0xFF375F, 3, 20);
+  pl2.position.set(4, -2, 2);
+  _brainScene.add(pl2);
+
+  // Brain — displaced icosahedron wireframe with blue→pink gradient
+  const brainGeo = new THREE.IcosahedronGeometry(1.85, 4);
+  const bPos = brainGeo.attributes.position;
+  for (let i = 0; i < bPos.count; i++) {
+    const x = bPos.getX(i), y = bPos.getY(i), z = bPos.getZ(i);
+    const d = 0.18 * (Math.sin(x * 3.5 + y * 2.3) + Math.cos(y * 2.7 + z * 3.1) + Math.sin(z * 4.0 + x * 1.8));
+    const len = Math.sqrt(x*x + y*y + z*z) || 1;
+    bPos.setXYZ(i, x + (x/len)*d, y + (y/len)*d, z + (z/len)*d);
+  }
+  brainGeo.computeVertexNormals();
+
+  const wireGeo = new THREE.WireframeGeometry(brainGeo);
+  const wp = wireGeo.attributes.position;
+  const wc = new Float32Array(wp.count * 3);
+  for (let i = 0; i < wp.count; i++) {
+    const t = Math.max(0, Math.min(1, (wp.getX(i) + 1.85) / 3.7));
+    wc[i*3]   = 0.388 + (1.0   - 0.388) * t;
+    wc[i*3+1] = 0.400 + (0.216 - 0.400) * t;
+    wc[i*3+2] = 0.945 + (0.373 - 0.945) * t;
+  }
+  wireGeo.setAttribute('color', new THREE.BufferAttribute(wc, 3));
+  const wireMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.65 });
+  const brainMesh = new THREE.LineSegments(wireGeo, wireMat);
+  _brainScene.add(brainMesh);
+
+  // Cerebellum bump
+  const cGeo = new THREE.IcosahedronGeometry(0.88, 3);
+  const cPos = cGeo.attributes.position;
+  for (let i = 0; i < cPos.count; i++) {
+    const x = cPos.getX(i), y = cPos.getY(i), z = cPos.getZ(i);
+    const d = 0.11 * Math.sin(x * 4.2 + y * 3.1 + z * 2.4);
+    const len = Math.sqrt(x*x + y*y + z*z) || 1;
+    cPos.setXYZ(i, x + (x/len)*d, y + (y/len)*d, z + (z/len)*d);
+  }
+  cGeo.computeVertexNormals();
+  const cwGeo = new THREE.WireframeGeometry(cGeo);
+  const cwp = cwGeo.attributes.position;
+  const cwc = new Float32Array(cwp.count * 3);
+  for (let i = 0; i < cwp.count; i++) {
+    const t = Math.max(0, Math.min(1, (cwp.getX(i) + 0.88) / 1.76));
+    cwc[i*3]   = 0.388 + (1.0   - 0.388) * t;
+    cwc[i*3+1] = 0.400 + (0.216 - 0.400) * t;
+    cwc[i*3+2] = 0.945 + (0.373 - 0.945) * t;
+  }
+  cwGeo.setAttribute('color', new THREE.BufferAttribute(cwc, 3));
+  const cerebellumMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.48 });
+  const cerebellum = new THREE.LineSegments(cwGeo, cerebellumMat);
+  cerebellum.position.set(0.35, -1.52, -0.85);
+  _brainScene.add(cerebellum);
+
+  // Creator nodes
+  _brainNodeMeshes = [];
+  const NODE_COLORS = [0x6366F1, 0xFF375F, 0x00D4FF, 0xFF9F0A, 0x30D158, 0xBF5AF2, 0xFF6B6B, 0x34C5FF];
+
+  profiles.forEach((profile, idx) => {
+    const r = 3.2 + Math.random() * 1.7;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const x = r * Math.sin(phi) * Math.cos(theta);
+    const y = (r * 0.68) * Math.sin(phi) * Math.sin(theta);
+    const z = r * Math.cos(phi);
+    const color = NODE_COLORS[idx % NODE_COLORS.length];
+
+    const nodeMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 14, 14),
+      new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.7, shininess: 100 })
+    );
+    nodeMesh.position.set(x, y, z);
+    _brainScene.add(nodeMesh);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.24, 0.36, 18),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+    );
+    ring.position.set(x, y, z);
+    _brainScene.add(ring);
+
+    const brainPt = new THREE.Vector3(x, y, z).normalize().multiplyScalar(1.92);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([brainPt, new THREE.Vector3(x, y, z)]);
+    const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.28 }));
+    _brainScene.add(line);
+
+    _brainNodeMeshes.push({ mesh: nodeMesh, ring, profile, baseY: y, seed: idx * 2.31 + 0.7 });
+  });
+
+  canvas.addEventListener('click', _brainClickHandler);
+  canvas.style.cursor = 'crosshair';
+
+  let tick = 0;
+  function animate() {
+    _brainAnimId = requestAnimationFrame(animate);
+    tick += 0.010;
+
+    brainMesh.rotation.y = tick * 0.22;
+    brainMesh.rotation.x = Math.sin(tick * 0.16) * 0.07;
+    cerebellum.rotation.y = tick * 0.22;
+    cerebellum.rotation.x = brainMesh.rotation.x;
+    wireMat.opacity = 0.42 + 0.23 * Math.sin(tick * 1.1);
+    cerebellumMat.opacity = 0.3 + 0.18 * Math.sin(tick * 1.1 + 0.5);
+
+    _brainNodeMeshes.forEach(n => {
+      const pulse = 1 + 0.13 * Math.sin(tick * 1.9 + n.seed);
+      n.mesh.scale.setScalar(pulse);
+      n.mesh.position.y = n.baseY + 0.1 * Math.sin(tick * 0.85 + n.seed);
+      n.ring.position.copy(n.mesh.position);
+      n.ring.lookAt(_brainCamera.position);
+      n.ring.material.opacity = 0.08 + 0.16 * Math.sin(tick * 1.4 + n.seed);
+    });
+
+    _brainRenderer.render(_brainScene, _brainCamera);
+  }
+  animate();
+}
+
 // ── Brain ─────────────────────────────────────────────────────────────────────
 
 async function renderBrain() {
+  disposeBrainScene();
   const el = $('#page-brain');
   el.innerHTML = `
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
-        <h2 class="page-title">The Brain</h2>
-        <p style="font-size:13px;color:var(--text-sub);margin-top:4px">Creator intelligence profiles — the deeper understanding powering your Writer and Ideator</p>
+        <h2 class="page-title">The <span class="accent">Brain</span></h2>
+        <p style="font-size:13px;color:var(--text-sub);margin-top:4px">Creator intelligence — powering your Writer and Ideator</p>
       </div>
       <button class="btn btn-accent" id="brain-build-all-btn" style="background:var(--purple);border-color:var(--purple)">Build All Profiles</button>
     </div>
+
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
       <select id="brain-add-select" class="agent-select" style="flex:1;max-width:320px;min-width:180px">
         <option value="">— Select a creator to add —</option>
       </select>
       <button class="btn btn-accent" id="brain-add-btn">Add to Brain</button>
     </div>
+
     <div id="brain-status" style="display:none;padding:10px 14px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:13px;color:var(--accent);margin-bottom:16px"></div>
+
+    <div id="brain-3d-container" style="position:relative;width:100%;height:520px;border-radius:18px;overflow:hidden;background:radial-gradient(ellipse at 50% 40%, #0e0a1f 0%, #060609 75%);margin-bottom:28px;border:1px solid rgba(99,102,241,0.18)">
+      <canvas id="brain-canvas" style="display:block"></canvas>
+      <div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(150,150,200,0.45);pointer-events:none;white-space:nowrap">AI Intelligence Brain</div>
+      <div id="brain-node-count" style="position:absolute;bottom:16px;right:18px;font-size:11px;font-weight:600;color:rgba(99,102,241,0.65);letter-spacing:0.05em"></div>
+      <div id="brain-3d-empty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:rgba(120,120,160,0.45);font-size:14px;pointer-events:none">
+        <div style="font-size:44px;margin-bottom:12px;opacity:0.25">🧠</div>
+        <div>Build profiles to connect creators to the Brain</div>
+      </div>
+    </div>
+
+    <div id="brain-profile-panel" style="position:fixed;top:0;right:0;width:360px;height:100vh;background:var(--bg-2);border-left:1px solid var(--border-strong);z-index:300;transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);overflow-y:auto;padding:28px 24px 40px;box-shadow:-8px 0 32px rgba(0,0,0,0.4)">
+      <button id="brain-panel-close" style="position:absolute;top:14px;right:14px;background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;line-height:1;padding:4px 8px" title="Close">×</button>
+      <div style="font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:20px">Creator Profile</div>
+      <div id="brain-panel-content"></div>
+    </div>
+
     <div id="brain-grid" class="brain-grid">
       <div style="color:var(--text-dim);font-size:13px;padding:40px 0;text-align:center">Loading profiles...</div>
     </div>
@@ -1457,6 +1684,10 @@ async function renderBrain() {
     btn.textContent = 'Add to Brain';
   });
 
+  document.getElementById('brain-panel-close').addEventListener('click', () => {
+    document.getElementById('brain-profile-panel').style.transform = 'translateX(100%)';
+  });
+
   loadBrainProfiles();
 }
 
@@ -1469,23 +1700,31 @@ async function loadBrainProfiles() {
       api('/api/accounts'),
     ]);
 
-    // Populate add-selector with creators not yet in the brain
+    // Populate add-selector
     const profiledIds = new Set(profiles.map(p => p.account_id));
     const select = $('#brain-add-select');
     if (select) {
-      const unprofiledOptions = accounts
-        .filter(a => !profiledIds.has(a.id))
-        .map(a => `<option value="${a.id}">@${a.username}${a.group_name ? ` (${a.group_name})` : ''}</option>`)
-        .join('');
-      select.innerHTML = `<option value="">— Select a creator to add —</option>${unprofiledOptions}`;
+      select.innerHTML = `<option value="">— Select a creator to add —</option>${
+        accounts.filter(a => !profiledIds.has(a.id))
+          .map(a => `<option value="${a.id}">@${a.username}${a.group_name ? ` (${a.group_name})` : ''}</option>`)
+          .join('')
+      }`;
     }
+
+    // Empty overlay
+    const emptyEl = document.getElementById('brain-3d-empty');
+    if (emptyEl) emptyEl.style.display = profiles.length ? 'none' : 'flex';
+
+    // Init 3D scene
+    initBrain3D(profiles);
+
+    const countEl = document.getElementById('brain-node-count');
+    if (countEl) countEl.textContent = profiles.length ? `${profiles.length} creator${profiles.length !== 1 ? 's' : ''} connected` : '';
 
     if (!profiles.length) {
       grid.innerHTML = `
-        <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--text-dim)">
-          <div style="font-size:32px;margin-bottom:12px">🧠</div>
-          <div style="font-size:15px;font-weight:600;color:var(--text-sub);margin-bottom:6px">No profiles built yet</div>
-          <div style="font-size:13px">Select a creator above or click "Build All Profiles" to get started.</div>
+        <div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:var(--text-dim)">
+          <div style="font-size:13px">Build a profile to see creator intelligence cards here.</div>
         </div>`;
       return;
     }
@@ -1505,36 +1744,13 @@ async function loadBrainProfiles() {
             <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--red-soft);color:var(--red);border:1px solid rgba(255,69,58,0.25)" onclick="removeProfile(${p.account_id}, '${p.username}')">Remove</button>
           </div>
         </div>
-
         ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
-
-        ${pillars.length ? `
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-          ${pillars.map(tag => `<span class="brain-pillar">${tag}</span>`).join('')}
-        </div>` : ''}
-
-        <div class="brain-section">
-          <div class="brain-label">Voice</div>
-          <div class="brain-value">${p.voice_fingerprint || '—'}</div>
-        </div>
-        <div class="brain-section">
-          <div class="brain-label">Audience Triggers</div>
-          <div class="brain-value">${p.audience_triggers || '—'}</div>
-        </div>
-        <div class="brain-section">
-          <div class="brain-label">Niche Position</div>
-          <div class="brain-value">${p.niche_positioning || '—'}</div>
-        </div>
-        <div class="brain-section">
-          <div class="brain-label">Visual Style</div>
-          <div class="brain-value">${p.visual_style || '—'}</div>
-        </div>
-
-        <details class="brain-discovery">
-          <summary>Find Similar Creators</summary>
-          <div class="brain-value" style="margin-top:8px">${p.discovery_brief || '—'}</div>
-        </details>
-
+        ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${pillars.map(tag => `<span class="brain-pillar">${tag}</span>`).join('')}</div>` : ''}
+        <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${p.voice_fingerprint || '—'}</div></div>
+        <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${p.audience_triggers || '—'}</div></div>
+        <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${p.niche_positioning || '—'}</div></div>
+        <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${p.visual_style || '—'}</div></div>
+        <details class="brain-discovery"><summary>Find Similar Creators</summary><div class="brain-value" style="margin-top:8px">${p.discovery_brief || '—'}</div></details>
         <div style="font-size:10px;color:var(--text-dim);margin-top:10px;text-align:right">Built ${timeAgo(p.built_at)}</div>
       </div>`;
     }).join('');
