@@ -55,8 +55,16 @@ function alertId(id) {
   return 'VRL-' + String(id).padStart(4, '0');
 }
 
+// Active client workspace (managers set this to view a client's data)
+let activeClientId = null;
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
+  let url = path;
+  // Append ?as=CLIENT_ID for managers/admins scoping to a client workspace
+  if (activeClientId && !path.startsWith('/api/admin') && !path.startsWith('/auth')) {
+    url += (url.includes('?') ? '&' : '?') + 'as=' + activeClientId;
+  }
+  const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -66,6 +74,92 @@ async function api(path, opts = {}) {
     throw new Error(err.error || 'Request failed');
   }
   return res.json();
+}
+
+// ── RBAC nav config ────────────────────────────────────────────────────────────
+const NAV_CONFIG = [
+  { page: 'dashboard',   label: 'Intelligence Hub', icon: '◼', roles: ['admin', 'manager', 'client'],
+    extras: '<span class="badge" id="unread-badge"></span>' },
+  { page: 'competitors', label: 'Creator Roster',   icon: '▲', roles: ['admin', 'manager'],
+    extras: '<span class="account-count" id="account-count"></span>' },
+  { page: 'agents',      label: 'Command Center',   icon: '◆', roles: ['admin', 'manager', 'client'] },
+  { page: 'brain',       label: 'The Brain',        icon: '⚙', roles: ['admin', 'manager'] },
+  { page: 'settings',    label: 'Settings',         icon: '○', roles: ['admin', 'manager'] },
+  { page: 'admin',       label: 'Admin',            icon: '☠', roles: ['admin'] },
+];
+
+function applyRoleNav(role) {
+  const nav = document.getElementById('main-nav');
+  if (!nav) return;
+  const allowed = NAV_CONFIG.filter(item => item.roles.includes(role));
+  nav.innerHTML = allowed.map(item => `
+    <a class="nav-item" data-page="${item.page}" href="#${item.page}">
+      <span class="nav-icon">${item.icon}</span>
+      <span class="nav-text">${item.label}</span>
+      ${item.extras || ''}
+    </a>
+  `).join('');
+  // Wire click handlers
+  $$('#main-nav .nav-item').forEach(el => {
+    el.addEventListener('click', e => {
+      e.preventDefault();
+      navigate(el.dataset.page);
+      window.location.hash = el.dataset.page;
+      if (window.innerWidth <= 600) closeSidebar?.();
+    });
+  });
+  // Set active class on current page
+  const cur = window.location.hash.replace('#', '') || 'dashboard';
+  document.querySelector(`#main-nav .nav-item[data-page="${cur}"]`)?.classList.add('active');
+  // Re-run stats to populate badge/count spans just created
+  updateStats();
+}
+
+function applyRouteGuard(role) {
+  const allowed = NAV_CONFIG.filter(i => i.roles.includes(role)).map(i => i.page);
+  const fallback = allowed.includes('dashboard') ? 'dashboard' : allowed[0];
+  // Guard hash changes
+  window.addEventListener('hashchange', () => {
+    const page = window.location.hash.replace('#', '');
+    if (pages.includes(page) && !allowed.includes(page)) {
+      window.location.hash = fallback;
+      navigate(fallback);
+    }
+  });
+  // Guard current page on load
+  const cur = window.location.hash.replace('#', '') || fallback;
+  if (pages.includes(cur) && !allowed.includes(cur)) {
+    window.location.hash = fallback;
+    navigate(fallback);
+  }
+}
+
+async function loadClientSwitcher(role) {
+  const switcherEl = document.getElementById('client-switcher');
+  const selectEl   = document.getElementById('client-select');
+  if (!switcherEl || !selectEl) return;
+  try {
+    const clients = await fetch('/api/my-clients').then(r => r.json());
+    if (!clients.length) return; // no clients assigned yet
+    switcherEl.style.display = 'block';
+    selectEl.innerHTML = `<option value="">My Workspace</option>` +
+      clients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    selectEl.addEventListener('change', () => {
+      activeClientId = selectEl.value ? parseInt(selectEl.value) : null;
+      const label = selectEl.value
+        ? clients.find(c => c.id === activeClientId)?.name
+        : null;
+      // Show banner when viewing a client workspace
+      const banner = document.getElementById('client-banner');
+      if (banner) {
+        banner.textContent = label ? `Viewing workspace: ${label}` : '';
+        banner.style.display = label ? 'block' : 'none';
+      }
+      // Reload the current page's data
+      const cur = window.location.hash.replace('#', '') || 'dashboard';
+      navigate(cur);
+    });
+  } catch { /* non-critical */ }
 }
 
 // ── System Clock ─────────────────────────────────────────────────────────────
@@ -106,14 +200,13 @@ let currentPage = 'dashboard';
 
 function navigate(page) {
   if (!pages.includes(page)) page = 'dashboard';
-  if (page === 'admin' && !(currentUser && currentUser.is_admin)) page = 'dashboard';
   if (currentPage === 'brain' && page !== 'brain') disposeBrainScene();
   currentPage = page;
   pages.forEach(p => {
     const el = $(`#page-${p}`);
     if (el) el.classList.toggle('hidden', p !== page);
   });
-  $$('.nav-item').forEach(el => {
+  $$('#main-nav .nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
   renderPage(page);
@@ -1852,54 +1945,77 @@ async function renderAdmin() {
   const el = $('#page-admin');
   el.innerHTML = `
     <div class="page-header">
-      <h2 class="page-title">Admin — Access Control</h2>
+      <h2 class="page-title">Admin — <span class="accent">Access Control</span></h2>
+      <p class="page-subtitle">Manage users, roles, and manager–client assignments</p>
     </div>
-    <div style="max-width:680px">
-      <div class="settings-card" style="margin-bottom:20px">
-        <div style="font-size:13px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:16px">Create New User</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div style="max-width:760px">
+
+      <!-- Create User -->
+      <div class="settings-card" style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:14px">Create New User</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Name</label>
-            <input id="admin-new-name" type="text" placeholder="Full name" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Name</label>
+            <input id="admin-new-name" type="text" placeholder="Full name">
           </div>
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Email</label>
-            <input id="admin-new-email" type="email" placeholder="user@example.com" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Email</label>
+            <input id="admin-new-email" type="email" placeholder="user@example.com">
           </div>
         </div>
-        <div style="margin-bottom:14px">
-          <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Password (min 8 characters)</label>
-          <input id="admin-new-password" type="password" placeholder="••••••••" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Password (min 8 chars)</label>
+            <input id="admin-new-password" type="password" placeholder="••••••••">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">Role</label>
+            <select id="admin-new-role">
+              <option value="client">Client — Feed + Agents only</option>
+              <option value="manager">Manager — Full access, up to 10 clients</option>
+              <option value="admin">Admin — God mode</option>
+            </select>
+          </div>
         </div>
         <button class="btn btn-accent" id="admin-create-btn">Create User</button>
         <div id="admin-create-error" style="display:none;margin-top:10px;padding:9px 12px;background:rgba(255,69,58,0.08);border:1px solid rgba(255,69,58,0.25);border-radius:8px;color:var(--red);font-size:13px"></div>
       </div>
 
-      <div class="settings-card">
-        <div style="font-size:13px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:16px">All Users</div>
+      <!-- All Users -->
+      <div class="settings-card" style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:14px">All Users</div>
         <div id="admin-user-list">Loading...</div>
       </div>
+
+      <!-- Activity Log -->
+      <div class="settings-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em">Activity Log</div>
+          <button class="btn" style="font-size:11px;padding:4px 10px" id="admin-log-refresh">Refresh</button>
+        </div>
+        <div id="admin-activity-log">Loading...</div>
+      </div>
+
     </div>
   `;
 
   $('#admin-create-btn').addEventListener('click', async () => {
     const btn = $('#admin-create-btn');
     const errEl = $('#admin-create-error');
-    const name = $('#admin-new-name').value.trim();
-    const email = $('#admin-new-email').value.trim();
+    const name     = $('#admin-new-name').value.trim();
+    const email    = $('#admin-new-email').value.trim();
     const password = $('#admin-new-password').value;
+    const role     = $('#admin-new-role').value;
     errEl.style.display = 'none';
     if (!name || !email || !password) { errEl.textContent = 'All fields required'; errEl.style.display = 'block'; return; }
     btn.disabled = true; btn.textContent = 'Creating...';
     try {
-      const res = await api('/api/admin/users', { method: 'POST', body: { name, email, password } });
-      if (res.success) {
-        $('#admin-new-name').value = '';
-        $('#admin-new-email').value = '';
-        $('#admin-new-password').value = '';
-        toast(`User "${name}" created`, 'success');
-        loadAdminUsers();
-      }
+      await api('/api/admin/users', { method: 'POST', body: { name, email, password, role } });
+      $('#admin-new-name').value = '';
+      $('#admin-new-email').value = '';
+      $('#admin-new-password').value = '';
+      toast(`User "${name}" created as ${role}`, 'success');
+      loadAdminUsers();
     } catch (err) {
       errEl.textContent = err.message || 'Failed to create user';
       errEl.style.display = 'block';
@@ -1907,7 +2023,19 @@ async function renderAdmin() {
     btn.disabled = false; btn.textContent = 'Create User';
   });
 
+  $('#admin-log-refresh').addEventListener('click', loadActivityLog);
+
   loadAdminUsers();
+  loadActivityLog();
+}
+
+const ROLE_COLORS = { admin: 'var(--accent)', manager: 'var(--cyan)', client: 'var(--green)' };
+const ROLE_BG     = { admin: 'var(--accent-soft)', manager: 'var(--cyan-soft)', client: 'var(--green-soft)' };
+
+function rolePill(role) {
+  const c = ROLE_COLORS[role] || 'var(--text-dim)';
+  const b = ROLE_BG[role]     || 'var(--bg-3)';
+  return `<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;padding:2px 7px;border-radius:10px;background:${b};color:${c}">${role}</span>`;
 }
 
 async function loadAdminUsers() {
@@ -1916,17 +2044,130 @@ async function loadAdminUsers() {
   try {
     const users = await api('/api/admin/users');
     if (!users.length) { list.innerHTML = '<div style="color:var(--text-dim);font-size:13px">No users yet.</div>'; return; }
-    list.innerHTML = users.map(u => `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:14px;font-weight:500;color:var(--text-main)">${u.name}${u.is_admin ? ' <span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 7px;border-radius:20px;font-weight:600;letter-spacing:0.04em">ADMIN</span>' : ''}</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${u.email} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
+    list.innerHTML = users.map(u => {
+      const role = u.role || (u.is_admin ? 'admin' : 'client');
+      const isSelf = currentUser && u.id === currentUser.id;
+      return `
+      <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:14px;font-weight:500;color:var(--text-main)">${u.name}</span>
+              ${rolePill(role)}
+              ${role === 'manager' ? `<span style="font-size:10px;color:var(--text-dim)">${u.client_count}/10 clients</span>` : ''}
+            </div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${u.email} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            ${isSelf ? '<span style="font-size:11px;color:var(--text-dim)">You</span>' : `
+              <select class="agent-select" style="font-size:11px;padding:4px 8px;width:auto" onchange="adminChangeRole(${u.id}, this.value, this)">
+                <option value="client"  ${role==='client'  ? 'selected' : ''}>Client</option>
+                <option value="manager" ${role==='manager' ? 'selected' : ''}>Manager</option>
+                <option value="admin"   ${role==='admin'   ? 'selected' : ''}>Admin</option>
+              </select>
+              <button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="adminDeleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')">Remove</button>
+            `}
+          </div>
         </div>
-        ${u.is_admin ? '' : `<button class="btn btn-danger" style="padding:5px 12px;font-size:12px" onclick="adminDeleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')">Remove</button>`}
-      </div>
-    `).join('');
+        ${role === 'manager' ? `<div id="mc-panel-${u.id}" style="margin-top:10px"></div><button class="btn btn-dim" style="font-size:11px;padding:4px 10px;margin-top:6px" onclick="toggleManagerClients(${u.id})">Manage Clients ▾</button>` : ''}
+      </div>`;
+    }).join('');
   } catch {
     list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users.</div>';
+  }
+}
+
+async function adminChangeRole(userId, newRole, selectEl) {
+  try {
+    await api(`/api/admin/users/${userId}/role`, { method: 'PATCH', body: { role: newRole } });
+    toast(`Role updated to ${newRole}`, 'success');
+    loadAdminUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+    selectEl.value = selectEl.dataset.prev || 'client';
+  }
+}
+
+async function toggleManagerClients(managerId) {
+  const panel = $(`#mc-panel-${managerId}`);
+  if (!panel) return;
+  if (panel.dataset.loaded) { panel.innerHTML = ''; delete panel.dataset.loaded; return; }
+  panel.dataset.loaded = '1';
+  panel.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Loading...</div>';
+  try {
+    const [clients, allClients] = await Promise.all([
+      api(`/api/admin/manager-clients/${managerId}`),
+      api('/api/admin/users').then(u => u.filter(x => (x.role || (x.is_admin ? 'admin' : 'client')) === 'client')),
+    ]);
+    const assignedIds = new Set(clients.map(c => c.id));
+    const available = allClients.filter(c => !assignedIds.has(c.id));
+    panel.innerHTML = `
+      <div style="background:var(--bg-3);border-radius:var(--radius-sm);padding:10px;font-size:12px">
+        <div style="font-weight:600;color:var(--text-sub);margin-bottom:8px">Assigned Clients (${clients.length}/10)</div>
+        ${clients.length ? clients.map(c => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--text-main)">${c.name} <span style="color:var(--text-dim)">${c.email}</span></span>
+            <button class="btn btn-danger" style="font-size:10px;padding:2px 8px" onclick="adminUnassignClient(${managerId},${c.id})">Remove</button>
+          </div>`).join('') : '<div style="color:var(--text-dim)">No clients assigned yet.</div>'}
+        ${available.length ? `
+          <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <select id="mc-add-${managerId}" class="agent-select" style="font-size:11px;padding:4px 8px;flex:1;min-width:140px">
+              <option value="">— Add client —</option>
+              ${available.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+            </select>
+            <button class="btn btn-cyan" style="font-size:11px;padding:4px 10px" onclick="adminAssignClient(${managerId})">Assign</button>
+          </div>` : clients.length >= 10 ? '<div style="color:var(--amber);margin-top:6px;font-size:11px">Cap reached (10/10)</div>' : ''}
+      </div>`;
+  } catch {
+    panel.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load.</div>';
+  }
+}
+
+async function adminAssignClient(managerId) {
+  const sel = $(`#mc-add-${managerId}`);
+  const clientId = sel?.value ? parseInt(sel.value) : null;
+  if (!clientId) return;
+  try {
+    await api('/api/admin/manager-clients', { method: 'POST', body: { managerId, clientId } });
+    toast('Client assigned', 'success');
+    const panel = $(`#mc-panel-${managerId}`);
+    if (panel) { delete panel.dataset.loaded; panel.innerHTML = ''; }
+    toggleManagerClients(managerId);
+    loadAdminUsers();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function adminUnassignClient(managerId, clientId) {
+  try {
+    await api(`/api/admin/manager-clients/${managerId}/${clientId}`, { method: 'DELETE' });
+    toast('Client removed', 'success');
+    const panel = $(`#mc-panel-${managerId}`);
+    if (panel) { delete panel.dataset.loaded; panel.innerHTML = ''; }
+    toggleManagerClients(managerId);
+    loadAdminUsers();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function loadActivityLog() {
+  const logEl = $('#admin-activity-log');
+  if (!logEl) return;
+  try {
+    const logs = await api('/api/admin/logs');
+    if (!logs.length) { logEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px">No activity recorded yet.</div>'; return; }
+    logEl.innerHTML = `<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;max-height:320px;overflow-y:auto">` +
+      logs.map(l => {
+        const role = l.user_role || 'unknown';
+        const c = ROLE_COLORS[role] || 'var(--text-dim)';
+        const details = l.details ? (() => { try { return JSON.stringify(JSON.parse(l.details), null, 0).replace(/[{}]/g,'').replace(/"/g,''); } catch { return l.details; } })() : '';
+        return `<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);align-items:baseline">
+          <span style="color:var(--text-dim);white-space:nowrap;flex-shrink:0">${l.created_at?.replace('T',' ').substring(0,16) || ''}</span>
+          <span style="color:${c};flex-shrink:0;font-weight:700">${(l.user_name||'system').substring(0,14)}</span>
+          <span style="color:var(--text-main)">${l.action}</span>
+          ${details ? `<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${details}</span>` : ''}
+        </div>`;
+      }).join('') + '</div>';
+  } catch {
+    logEl.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load log.</div>';
   }
 }
 
@@ -1942,15 +2183,8 @@ async function adminDeleteUser(id, name) {
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
-
-$$('.nav-item').forEach(el => {
-  el.addEventListener('click', e => {
-    e.preventDefault();
-    navigate(el.dataset.page);
-    window.location.hash = el.dataset.page;
-  });
-});
-
+// Nav items are built dynamically by applyRoleNav() after /api/me resolves.
+// hashchange guard is wired by applyRouteGuard().
 window.addEventListener('hashchange', () => {
   const page = window.location.hash.replace('#', '');
   if (pages.includes(page)) navigate(page);
@@ -1962,16 +2196,31 @@ navigate(initPage);
 updateStats();
 setInterval(updateStats, 30000);
 
-// ── Operator Info ─────────────────────────────────────────────────────────────
+// ── Operator Info + RBAC bootstrap ───────────────────────────────────────────
 let currentUser = null;
 fetch('/api/me').then(r => r.json()).then(user => {
   currentUser = user;
-  const el = document.getElementById('operator-name');
-  if (el && user.name) el.textContent = user.name;
-  if (user.is_admin) {
-    const navAdmin = document.getElementById('nav-admin');
-    if (navAdmin) navAdmin.style.display = '';
+  const role = user.role || (user.is_admin ? 'admin' : 'client');
+
+  const nameEl = document.getElementById('operator-name');
+  if (nameEl && user.name) nameEl.textContent = user.name;
+
+  const roleEl = document.getElementById('operator-role');
+  if (roleEl) {
+    roleEl.textContent = role.toUpperCase();
+    roleEl.dataset.role = role;
   }
+
+  // Hide Execute Scan for clients
+  const sidebarOps = document.querySelector('.sidebar-ops');
+  if (sidebarOps && role === 'client') sidebarOps.style.display = 'none';
+
+  // Build nav + route guards based on role
+  applyRoleNav(role);
+  applyRouteGuard(role);
+
+  // Load client switcher for managers and admins
+  if (role === 'manager' || role === 'admin') loadClientSwitcher(role);
 }).catch(() => {});
 
 // ── Mobile sidebar toggle ─────────────────────────────────────────────────────

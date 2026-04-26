@@ -1386,6 +1386,35 @@ select option { background: var(--bg-2); }
 .brain-discovery summary::before { content: '▶ '; font-size: 10px; }
 .brain-discovery[open] summary::before { content: '▼ '; }
 
+/* ── Role badge (sidebar footer) ──────────────────────────── */
+.role-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--bg-3);
+  color: var(--text-dim);
+}
+.role-badge[data-role="admin"]   { background: var(--accent-soft);  color: var(--accent); }
+.role-badge[data-role="manager"] { background: var(--cyan-soft);    color: var(--cyan); }
+.role-badge[data-role="client"]  { background: var(--green-soft);   color: var(--green); }
+
+/* ── Client workspace banner ───────────────────────────────── */
+.client-workspace-banner {
+  display: none;
+  background: var(--cyan-soft);
+  border-bottom: 1px solid var(--cyan);
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 16px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
 /* ── Mobile top bar (hidden on desktop) ────────────────────── */
 .mobile-topbar {
   display: none;
