@@ -84,6 +84,9 @@ const NAV_CONFIG = [
     extras: '<span class="account-count" id="account-count"></span>' },
   { page: 'agents',      label: 'Command Center',   icon: '◆', roles: ['admin', 'manager', 'client'] },
   { page: 'brain',       label: 'The Brain',        icon: '⚙', roles: ['admin', 'manager'] },
+  { page: 'messages',    label: 'Messages',         icon: '✉', roles: ['admin', 'manager', 'client'],
+    extras: '<span class="badge" id="chat-badge"></span>' },
+  { page: 'content',     label: 'Content Hub',      icon: '◉', roles: ['admin', 'manager', 'client'] },
   { page: 'settings',    label: 'Settings',         icon: '○', roles: ['admin', 'manager'] },
   { page: 'admin',       label: 'Admin',            icon: '☠', roles: ['admin'] },
 ];
@@ -195,7 +198,7 @@ document.getElementById('theme-toggle')?.addEventListener('click', () => {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-const pages = ['dashboard', 'competitors', 'agents', 'brain', 'settings', 'admin'];
+const pages = ['dashboard', 'competitors', 'agents', 'brain', 'messages', 'content', 'settings', 'admin'];
 let currentPage = 'dashboard';
 
 function navigate(page) {
@@ -219,6 +222,8 @@ function renderPage(page) {
   else if (page === 'settings') renderSettings();
   else if (page === 'brain') renderBrain();
   else if (page === 'admin') renderAdmin();
+  else if (page === 'messages') renderMessages();
+  else if (page === 'content') renderContent();
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -242,6 +247,17 @@ async function updateStats() {
     return s;
   } catch { return {}; }
 }
+
+async function updateChatBadge() {
+  try {
+    const { unread } = await fetch('/api/chat/unread').then(r => r.json());
+    const badge = $('#chat-badge');
+    if (!badge) return;
+    if (unread > 0) { badge.textContent = unread; badge.classList.add('visible'); }
+    else badge.classList.remove('visible');
+  } catch { /* non-critical */ }
+}
+setInterval(updateChatBadge, 5000);
 
 // ── Ticker ────────────────────────────────────────────────────────────────────
 
@@ -2180,6 +2196,371 @@ async function adminDeleteUser(id, name) {
   } catch (err) {
     toast(err.message || 'Failed to remove user', 'error');
   }
+}
+
+// ── Messages (Chat) ───────────────────────────────────────────────────────────
+
+let chatState = { roomId: null, lastId: 0, pollTimer: null };
+
+function renderMessages() {
+  const pg = $('#page-messages');
+  pg.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Messages</h1>
+    </div>
+    <div class="chat-layout">
+      <div class="chat-sidebar" id="chat-sidebar">
+        <div class="chat-sidebar-header">Conversations</div>
+        <div id="chat-room-list"><div class="empty-state" style="padding:16px;font-size:13px">Loading…</div></div>
+      </div>
+      <div class="chat-main" id="chat-main">
+        <div class="chat-empty-state" id="chat-placeholder">
+          <div style="font-size:32px;margin-bottom:8px">✉</div>
+          <div style="font-size:14px;color:var(--text-dim)">Select a conversation to start messaging</div>
+        </div>
+      </div>
+    </div>`;
+  loadChatRooms();
+}
+
+async function loadChatRooms() {
+  try {
+    const [rooms, peers] = await Promise.all([
+      fetch('/api/chat/rooms').then(r => r.json()),
+      fetch('/api/chat/peers').then(r => r.json()),
+    ]);
+
+    // Merge: show all peers, highlight ones with existing rooms
+    const roomsByPeer = {};
+    for (const r of rooms) roomsByPeer[r.peer_id] = r;
+
+    const listEl = $('#chat-room-list');
+    if (!peers.length) {
+      listEl.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim)">No contacts yet.</div>';
+      return;
+    }
+
+    listEl.innerHTML = peers.map(p => {
+      const room = roomsByPeer[p.id];
+      const unread = room?.unread_count || 0;
+      const preview = room?.last_message ? room.last_message.substring(0, 36) + (room.last_message.length > 36 ? '…' : '') : 'Start a conversation';
+      const active = chatState.roomId && room?.id === chatState.roomId ? ' active' : '';
+      return `<div class="chat-room-item${active}" data-peer="${p.id}" data-name="${p.name}" onclick="openRoom(${p.id}, '${p.name.replace(/'/g, "\\'")}')">
+        <div class="chat-room-avatar">${initials(p.name)}</div>
+        <div class="chat-room-info">
+          <div class="chat-room-name">${p.name} ${unread ? `<span class="chat-unread-dot">${unread}</span>` : ''}</div>
+          <div class="chat-room-preview">${preview}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // If a room is already open, keep it open
+    if (chatState.roomId) {
+      const cur = rooms.find(r => r.id === chatState.roomId);
+      if (cur) document.querySelector(`.chat-room-item[data-peer="${cur.peer_id}"]`)?.classList.add('active');
+    }
+  } catch (e) {
+    $('#chat-room-list').innerHTML = `<div style="padding:16px;font-size:12px;color:var(--red)">${e.message}</div>`;
+  }
+}
+
+async function openRoom(peerId, peerName) {
+  stopChatPoller();
+
+  // Get or create room
+  let roomId;
+  try {
+    const r = await fetch('/api/chat/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peerId }),
+    }).then(r => r.json());
+    if (r.error) { toast(r.error, 'error'); return; }
+    roomId = r.roomId;
+  } catch (e) { toast(e.message, 'error'); return; }
+
+  chatState.roomId = roomId;
+  chatState.lastId = 0;
+
+  // Highlight active room
+  $$('.chat-room-item').forEach(el => el.classList.toggle('active', parseInt(el.dataset.peer) === peerId));
+
+  const main = $('#chat-main');
+  main.innerHTML = `
+    <div class="chat-header">
+      <div class="chat-header-avatar">${initials(peerName)}</div>
+      <div class="chat-header-name">${peerName}</div>
+    </div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input-bar">
+      <textarea id="chat-input" class="chat-input" placeholder="Type a message…" rows="1"></textarea>
+      <button class="btn btn-primary" id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+    </div>`;
+
+  // Send on Enter (Shift+Enter for newline)
+  $('#chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+  });
+
+  await loadMessages(roomId);
+  startChatPoller(roomId);
+  updateChatBadge();
+}
+
+async function loadMessages(roomId, since = 0) {
+  try {
+    const msgs = await fetch(`/api/chat/rooms/${roomId}/messages?since=${since}`).then(r => r.json());
+    const container = $('#chat-messages');
+    if (!container) return;
+
+    if (since === 0) container.innerHTML = '';
+    if (!msgs.length) {
+      if (since === 0) container.innerHTML = '<div class="chat-no-msgs">No messages yet. Say hello!</div>';
+      return;
+    }
+
+    const noMsgs = container.querySelector('.chat-no-msgs');
+    if (noMsgs) noMsgs.remove();
+
+    const myId = currentUser?.id;
+    for (const m of msgs) {
+      const mine = m.sender_id === myId;
+      const div = document.createElement('div');
+      div.className = `chat-msg ${mine ? 'chat-msg-mine' : 'chat-msg-theirs'}`;
+      div.innerHTML = `
+        ${!mine ? `<div class="chat-msg-sender">${m.sender_name}</div>` : ''}
+        <div class="chat-msg-bubble">${escapeHtml(m.body)}</div>
+        <div class="chat-msg-time">${timeAgo(m.created_at)}</div>`;
+      container.appendChild(div);
+    }
+    chatState.lastId = msgs[msgs.length - 1].id;
+    container.scrollTop = container.scrollHeight;
+  } catch { /* ignore */ }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function sendChatMessage() {
+  const input = $('#chat-input');
+  const body = (input?.value || '').trim();
+  if (!body || !chatState.roomId) return;
+  input.value = '';
+  input.style.height = '';
+  try {
+    await fetch(`/api/chat/rooms/${chatState.roomId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    await loadMessages(chatState.roomId, chatState.lastId);
+    loadChatRooms();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function startChatPoller(roomId) {
+  stopChatPoller();
+  chatState.pollTimer = setInterval(async () => {
+    if (currentPage !== 'messages' || chatState.roomId !== roomId) return stopChatPoller();
+    await loadMessages(roomId, chatState.lastId);
+    updateChatBadge();
+  }, 3000);
+}
+
+function stopChatPoller() {
+  if (chatState.pollTimer) { clearInterval(chatState.pollTimer); chatState.pollTimer = null; }
+}
+
+// ── Content Hub ───────────────────────────────────────────────────────────────
+
+let contentMyClients = [];
+
+async function renderContent() {
+  const pg = $('#page-content');
+  const role = currentUser?.role || 'client';
+  const canCreate = role === 'admin' || role === 'manager';
+
+  pg.innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Content Hub</h1>
+      ${canCreate ? `<button class="btn btn-primary" onclick="showContentModal()">+ New Item</button>` : ''}
+    </div>
+    <div class="filter-tabs" id="content-filter-tabs">
+      <button class="filter-tab active" data-type="all"  onclick="filterContent('all', this)">All</button>
+      <button class="filter-tab"        data-type="idea"   onclick="filterContent('idea', this)">Ideas</button>
+      <button class="filter-tab"        data-type="report" onclick="filterContent('report', this)">Reports</button>
+    </div>
+    <div id="content-grid" class="content-grid"><div class="empty-state">Loading…</div></div>
+
+    <div id="content-modal" class="modal-overlay hidden">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+          <span class="modal-title" id="content-modal-title">New Content Item</span>
+          <button class="modal-close" onclick="$('#content-modal').classList.add('hidden')">Close</button>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+          <input type="hidden" id="content-edit-id">
+          <div>
+            <label class="settings-label">For Client</label>
+            <select id="content-client-select" class="agent-select" style="width:100%"></select>
+          </div>
+          <div>
+            <label class="settings-label">Type</label>
+            <select id="content-type-select" class="agent-select" style="width:100%">
+              <option value="idea">Idea</option>
+              <option value="report">Report</option>
+            </select>
+          </div>
+          <div>
+            <label class="settings-label">Platform</label>
+            <input id="content-platform" class="settings-input" placeholder="e.g. Instagram, TikTok" style="width:100%">
+          </div>
+          <div>
+            <label class="settings-label">Title</label>
+            <input id="content-title" class="settings-input" placeholder="Title" style="width:100%">
+          </div>
+          <div>
+            <label class="settings-label">Details</label>
+            <textarea id="content-body" class="settings-input" rows="5" placeholder="Describe the idea or report…" style="width:100%;resize:vertical"></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="submitContentItem()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="content-view-modal" class="modal-overlay hidden">
+      <div class="modal" style="max-width:560px">
+        <div class="modal-header">
+          <span class="modal-title" id="view-modal-title">Item</span>
+          <button class="modal-close" onclick="$('#content-view-modal').classList.add('hidden')">Close</button>
+        </div>
+        <div id="content-view-body" style="padding:18px;font-size:14px;line-height:1.7;white-space:pre-wrap"></div>
+      </div>
+    </div>`;
+
+  if (canCreate) {
+    try {
+      contentMyClients = await fetch('/api/my-clients').then(r => r.json());
+      const sel = $('#content-client-select');
+      if (sel) sel.innerHTML = contentMyClients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    } catch { contentMyClients = []; }
+  }
+  await loadContentItems('all');
+}
+
+let allContentItems = [];
+
+async function loadContentItems(type = 'all') {
+  const grid = $('#content-grid');
+  if (!grid) return;
+  try {
+    allContentItems = await api('/api/content');
+    renderContentGrid(allContentItems, type);
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state">${e.message}</div>`;
+  }
+}
+
+function renderContentGrid(items, type = 'all') {
+  const grid = $('#content-grid');
+  if (!grid) return;
+  const filtered = type === 'all' ? items : items.filter(i => i.type === type);
+  const role = currentUser?.role || 'client';
+  const canEdit = role === 'admin' || role === 'manager';
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="empty-state">No content items yet.</div>';
+    return;
+  }
+
+  grid.innerHTML = filtered.map(item => `
+    <div class="content-card" onclick="viewContentItem(${item.id})">
+      <div class="content-card-header">
+        <span class="content-type-badge content-type-${item.type}">${item.type.toUpperCase()}</span>
+        ${item.platform ? `<span class="content-platform">${item.platform}</span>` : ''}
+        ${canEdit ? `<button class="btn-icon" title="Delete" onclick="event.stopPropagation();deleteContentItem(${item.id})">✕</button>` : ''}
+      </div>
+      <div class="content-card-title">${item.title}</div>
+      ${item.body ? `<div class="content-card-preview">${item.body.substring(0, 100)}${item.body.length > 100 ? '…' : ''}</div>` : ''}
+      <div class="content-card-meta">
+        ${item.client_name ? `For: <strong>${item.client_name}</strong> · ` : ''}
+        By ${item.creator_name} · ${timeAgo(item.created_at)}
+      </div>
+    </div>`).join('');
+}
+
+function filterContent(type, btn) {
+  $$('#content-filter-tabs .filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderContentGrid(allContentItems, type);
+}
+
+function viewContentItem(id) {
+  const item = allContentItems.find(i => i.id === id);
+  if (!item) return;
+  $('#view-modal-title').textContent = item.title;
+  $('#content-view-body').innerHTML = `
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <span class="content-type-badge content-type-${item.type}">${item.type.toUpperCase()}</span>
+      ${item.platform ? `<span class="content-platform">${item.platform}</span>` : ''}
+    </div>
+    <div>${item.body ? escapeHtml(item.body).replace(/\n/g, '<br>') : '<em style="color:var(--text-dim)">No details provided.</em>'}</div>
+    <div style="margin-top:14px;font-size:12px;color:var(--text-dim)">
+      Created by ${item.creator_name} · ${timeAgo(item.created_at)}
+      ${item.client_name ? ` · For ${item.client_name}` : ''}
+    </div>`;
+  $('#content-view-modal').classList.remove('hidden');
+}
+
+function showContentModal(editId = null) {
+  $('#content-edit-id').value = editId || '';
+  $('#content-modal-title').textContent = editId ? 'Edit Item' : 'New Content Item';
+  if (!editId) {
+    $('#content-title').value = '';
+    $('#content-body').value = '';
+    $('#content-platform').value = '';
+  } else {
+    const item = allContentItems.find(i => i.id === editId);
+    if (item) {
+      $('#content-title').value = item.title;
+      $('#content-body').value = item.body || '';
+      $('#content-platform').value = item.platform || '';
+      $('#content-type-select').value = item.type;
+      $('#content-client-select').value = item.client_id;
+    }
+  }
+  $('#content-modal').classList.remove('hidden');
+}
+
+async function submitContentItem() {
+  const editId   = $('#content-edit-id').value;
+  const clientId = $('#content-client-select').value;
+  const type     = $('#content-type-select').value;
+  const title    = $('#content-title').value.trim();
+  const body     = $('#content-body').value.trim();
+  const platform = $('#content-platform').value.trim();
+  if (!title) { toast('Title is required', 'error'); return; }
+  try {
+    if (editId) {
+      await api(`/api/content/${editId}`, { method: 'PATCH', body: { title, body, platform } });
+    } else {
+      if (!clientId) { toast('Select a client', 'error'); return; }
+      await api('/api/content', { method: 'POST', body: { clientId: parseInt(clientId), type, title, body, platform } });
+    }
+    $('#content-modal').classList.add('hidden');
+    toast('Saved', 'success');
+    await loadContentItems($('#content-filter-tabs .filter-tab.active')?.dataset.type || 'all');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteContentItem(id) {
+  if (!confirm('Delete this item?')) return;
+  try {
+    await api(`/api/content/${id}`, { method: 'DELETE' });
+    toast('Deleted', 'success');
+    await loadContentItems($('#content-filter-tabs .filter-tab.active')?.dataset.type || 'all');
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
