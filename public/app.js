@@ -1623,6 +1623,13 @@ async function renderBrain() {
 
     <div id="brain-status" style="display:none;padding:10px 14px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:13px;color:var(--accent);margin-bottom:16px"></div>
 
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <input id="brain-search-input" class="agent-input" placeholder="Search by voice, niche, style, audience…" style="flex:1;min-width:180px">
+      <button class="btn btn-cyan" id="brain-search-btn" style="white-space:nowrap">Search Profiles</button>
+      <button class="btn btn-dim" id="brain-search-clear" style="display:none">Clear</button>
+    </div>
+    <div id="brain-search-results" style="display:none;margin-bottom:20px"></div>
+
     <div id="brain-3d-container" style="position:relative;width:100%;height:520px;border-radius:18px;overflow:hidden;background:radial-gradient(ellipse at 50% 40%, #0e0a1f 0%, #060609 75%);margin-bottom:28px;border:1px solid rgba(99,102,241,0.18)">
       <canvas id="brain-canvas" style="display:block"></canvas>
       <div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(150,150,200,0.45);pointer-events:none;white-space:nowrap">AI Intelligence Brain</div>
@@ -1689,6 +1696,64 @@ async function renderBrain() {
   });
 
   loadBrainProfiles();
+
+  // Brain semantic search
+  const brainSearchBtn    = $('#brain-search-btn');
+  const brainSearchClear  = $('#brain-search-clear');
+  const brainSearchInput  = $('#brain-search-input');
+  const brainSearchResults = $('#brain-search-results');
+
+  async function runBrainSearch() {
+    const query = brainSearchInput.value.trim();
+    if (!query) return;
+    brainSearchBtn.disabled = true;
+    brainSearchBtn.textContent = 'Searching…';
+    brainSearchResults.style.display = 'block';
+    brainSearchResults.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">Analyzing profiles with AI…</div>';
+    try {
+      const data = await api('/api/brain/search', { method: 'POST', body: { query } });
+      if (!data.results || !data.results.length) {
+        brainSearchResults.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">No matching profiles found.</div>';
+      } else {
+        brainSearchResults.innerHTML = `
+          <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">
+            ${data.results.length} match${data.results.length !== 1 ? 'es' : ''} for &ldquo;${data.query}&rdquo;
+          </div>
+          <div class="brain-grid">
+            ${data.results.map(p => {
+              const pillars = (() => { try { return JSON.parse(p.content_pillars); } catch { return []; } })();
+              return `
+              <div class="brain-card" style="border-color:rgba(50,173,230,0.4)">
+                <div class="brain-card-header">
+                  <div class="pod-avatar">${p.profile_pic_url ? `<img src="${proxyImg(p.profile_pic_url)}" onerror="this.style.display='none'">` : ''}<span>${initials(p.full_name || p.username)}</span></div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:14px;color:var(--text-main)">@${p.username}</div>
+                    <div style="font-size:12px;color:var(--text-dim)">${(p.followers_count||0).toLocaleString()} followers · ${p.group_name||'Ungrouped'}</div>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:var(--cyan);background:var(--cyan-soft);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;line-height:1.5">${p.relevance_reason}</div>
+                ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
+                ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${pillars.map(t => `<span class="brain-pillar">${t}</span>`).join('')}</div>` : ''}
+              </div>`;
+            }).join('')}
+          </div>`;
+      }
+      brainSearchClear.style.display = '';
+    } catch (err) {
+      brainSearchResults.innerHTML = `<div style="color:var(--red);font-size:13px">${err.message}</div>`;
+    }
+    brainSearchBtn.disabled = false;
+    brainSearchBtn.textContent = 'Search Profiles';
+  }
+
+  brainSearchBtn.addEventListener('click', runBrainSearch);
+  brainSearchInput.addEventListener('keydown', e => { if (e.key === 'Enter') runBrainSearch(); });
+  brainSearchClear.addEventListener('click', () => {
+    brainSearchInput.value = '';
+    brainSearchResults.style.display = 'none';
+    brainSearchResults.innerHTML = '';
+    brainSearchClear.style.display = 'none';
+  });
 }
 
 async function loadBrainProfiles() {
@@ -1908,3 +1973,30 @@ fetch('/api/me').then(r => r.json()).then(user => {
     if (navAdmin) navAdmin.style.display = '';
   }
 }).catch(() => {});
+
+// ── Mobile sidebar toggle ─────────────────────────────────────────────────────
+(function () {
+  const menuBtn = document.getElementById('mobile-menu-btn');
+  const overlay = document.getElementById('sidebar-overlay');
+  const sidebar = document.querySelector('.sidebar');
+  if (!menuBtn || !overlay || !sidebar) return;
+
+  function openSidebar() {
+    sidebar.classList.add('mobile-open');
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  menuBtn.addEventListener('click', openSidebar);
+  overlay.addEventListener('click', closeSidebar);
+
+  // Close drawer whenever a nav item is tapped on mobile
+  $$('.nav-item').forEach(el => el.addEventListener('click', () => {
+    if (window.innerWidth <= 600) closeSidebar();
+  }));
+}());
