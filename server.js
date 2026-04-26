@@ -83,6 +83,11 @@ function requireAuth(req, res, next) {
   res.redirect('/login');
 }
 
+function requireAdmin(req, res, next) {
+  if (req.isAuthenticated() && req.user.is_admin) return next();
+  res.status(403).json({ error: 'Forbidden' });
+}
+
 // Serve static assets without auth (CSS, JS, etc.)
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
@@ -92,23 +97,8 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-app.post('/auth/register', (req, res) => {
-  const { email, password, name } = req.body;
-  if (!email || !password || !name) return res.status(400).json({ error: 'All fields required' });
-  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  if (existing) return res.status(409).json({ error: 'Email already registered' });
-  const hash = bcrypt.hashSync(password, 10);
-  const { lastInsertRowid } = db.prepare(
-    'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
-  ).run(email.toLowerCase().trim(), hash, name.trim());
-  seedUserDefaults(lastInsertRowid);
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(lastInsertRowid);
-  req.login(user, err => {
-    if (err) return res.status(500).json({ error: 'Login failed' });
-    res.json({ success: true });
-  });
-});
+// Registration is admin-only — no public sign-up
+app.post('/auth/register', (req, res) => res.status(403).json({ error: 'Registration is disabled. Contact the administrator.' }));
 
 app.post('/auth/login', (req, res, next) => {
   passport.authenticate('local', (err, user, info) => {
@@ -132,8 +122,36 @@ app.get('/auth/logout', (req, res) => {
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
-  const { id, email, name, avatar_url } = req.user;
-  res.json({ id, email, name, avatar_url });
+  const { id, email, name, avatar_url, is_admin } = req.user;
+  res.json({ id, email, name, avatar_url, is_admin: !!is_admin });
+});
+
+// ── Admin routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+  const users = db.prepare('SELECT id, name, email, is_admin, created_at FROM users ORDER BY created_at ASC').all();
+  res.json(users);
+});
+
+app.post('/api/admin/users', requireAdmin, (req, res) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) return res.status(400).json({ error: 'Name, email, and password are required' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  if (existing) return res.status(409).json({ error: 'Email already registered' });
+  const hash = bcrypt.hashSync(password, 10);
+  const { lastInsertRowid } = db.prepare(
+    'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
+  ).run(email.toLowerCase().trim(), hash, name.trim());
+  seedUserDefaults(lastInsertRowid);
+  res.json({ success: true, id: lastInsertRowid });
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+  const targetId = parseInt(req.params.id);
+  if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
+  db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  res.json({ success: true });
 });
 
 // Main app — auth required

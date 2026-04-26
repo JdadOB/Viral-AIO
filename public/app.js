@@ -101,14 +101,15 @@ document.getElementById('theme-toggle')?.addEventListener('click', () => {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-const pages = ['dashboard', 'competitors', 'agents', 'settings'];
+const pages = ['dashboard', 'competitors', 'agents', 'settings', 'admin'];
 let currentPage = 'dashboard';
 
 function navigate(page) {
   if (!pages.includes(page)) page = 'dashboard';
   currentPage = page;
   pages.forEach(p => {
-    $(`#page-${p}`).classList.toggle('hidden', p !== page);
+    const el = $(`#page-${p}`);
+    if (el) el.classList.toggle('hidden', p !== page);
   });
   $$('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -121,6 +122,7 @@ function renderPage(page) {
   else if (page === 'competitors') renderCompetitors();
   else if (page === 'agents') renderAgents();
   else if (page === 'settings') renderSettings();
+  else if (page === 'admin') renderAdmin();
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -1479,6 +1481,101 @@ function wireAgentButtons() {
   });
 }
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+async function renderAdmin() {
+  const el = $('#page-admin');
+  el.innerHTML = `
+    <div class="page-header">
+      <h2 class="page-title">Admin — Access Control</h2>
+    </div>
+    <div style="max-width:680px">
+      <div class="settings-card" style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:16px">Create New User</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Name</label>
+            <input id="admin-new-name" type="text" placeholder="Full name" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Email</label>
+            <input id="admin-new-email" type="email" placeholder="user@example.com" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+          </div>
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px">Password (min 8 characters)</label>
+          <input id="admin-new-password" type="password" placeholder="••••••••" style="width:100%;background:var(--bg-3);border:1px solid var(--border-strong);border-radius:8px;padding:9px 11px;color:var(--text-main);font-size:13px;font-family:var(--font);outline:none">
+        </div>
+        <button class="btn btn-accent" id="admin-create-btn">Create User</button>
+        <div id="admin-create-error" style="display:none;margin-top:10px;padding:9px 12px;background:rgba(255,69,58,0.08);border:1px solid rgba(255,69,58,0.25);border-radius:8px;color:var(--red);font-size:13px"></div>
+      </div>
+
+      <div class="settings-card">
+        <div style="font-size:13px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:16px">All Users</div>
+        <div id="admin-user-list">Loading...</div>
+      </div>
+    </div>
+  `;
+
+  $('#admin-create-btn').addEventListener('click', async () => {
+    const btn = $('#admin-create-btn');
+    const errEl = $('#admin-create-error');
+    const name = $('#admin-new-name').value.trim();
+    const email = $('#admin-new-email').value.trim();
+    const password = $('#admin-new-password').value;
+    errEl.style.display = 'none';
+    if (!name || !email || !password) { errEl.textContent = 'All fields required'; errEl.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = 'Creating...';
+    try {
+      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      if (res.success) {
+        $('#admin-new-name').value = '';
+        $('#admin-new-email').value = '';
+        $('#admin-new-password').value = '';
+        toast(`User "${name}" created`, 'success');
+        loadAdminUsers();
+      }
+    } catch (err) {
+      errEl.textContent = err.message || 'Failed to create user';
+      errEl.style.display = 'block';
+    }
+    btn.disabled = false; btn.textContent = 'Create User';
+  });
+
+  loadAdminUsers();
+}
+
+async function loadAdminUsers() {
+  const list = $('#admin-user-list');
+  if (!list) return;
+  try {
+    const users = await api('/api/admin/users');
+    if (!users.length) { list.innerHTML = '<div style="color:var(--text-dim);font-size:13px">No users yet.</div>'; return; }
+    list.innerHTML = users.map(u => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:14px;font-weight:500;color:var(--text-main)">${u.name}${u.is_admin ? ' <span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 7px;border-radius:20px;font-weight:600;letter-spacing:0.04em">ADMIN</span>' : ''}</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${u.email} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
+        </div>
+        ${u.is_admin ? '' : `<button class="btn btn-danger" style="padding:5px 12px;font-size:12px" onclick="adminDeleteUser(${u.id}, '${u.name.replace(/'/g, "\\'")}')">Remove</button>`}
+      </div>
+    `).join('');
+  } catch {
+    list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users.</div>';
+  }
+}
+
+async function adminDeleteUser(id, name) {
+  if (!confirm(`Remove "${name}"? They will lose access immediately.`)) return;
+  try {
+    await api(`/api/admin/users/${id}`, { method: 'DELETE' });
+    toast(`"${name}" removed`, 'success');
+    loadAdminUsers();
+  } catch (err) {
+    toast(err.message || 'Failed to remove user', 'error');
+  }
+}
+
 // ── Nav ───────────────────────────────────────────────────────────────────────
 
 $$('.nav-item').forEach(el => {
@@ -1501,7 +1598,13 @@ updateStats();
 setInterval(updateStats, 30000);
 
 // ── Operator Info ─────────────────────────────────────────────────────────────
+let currentUser = null;
 fetch('/api/me').then(r => r.json()).then(user => {
+  currentUser = user;
   const el = document.getElementById('operator-name');
   if (el && user.name) el.textContent = user.name;
+  if (user.is_admin) {
+    const navAdmin = document.getElementById('nav-admin');
+    if (navAdmin) navAdmin.classList.remove('hidden');
+  }
 }).catch(() => {});

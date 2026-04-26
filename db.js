@@ -118,6 +118,11 @@ db.exec(`
 `);
 
 try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL'); } catch (e) {}
+try { db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+// Ensure the operator account is always an admin
+db.prepare("UPDATE users SET is_admin = 1 WHERE email = 'jonadkins03@gmail.com'").run();
 try { db.exec('ALTER TABLE accounts ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
