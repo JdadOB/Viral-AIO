@@ -186,24 +186,43 @@ app.post('/api/accounts/bulk-delete', requireAuth, (req, res) => {
 // ── Groups ────────────────────────────────────────────────────────────────────
 
 app.get('/api/groups', requireAuth, (req, res) => {
+  const uid = req.user.id;
+
+  // Seed any account group_names that aren't in user_groups yet (migration for existing users)
+  const accountGroups = db.prepare(
+    "SELECT DISTINCT group_name FROM accounts WHERE user_id = ? AND group_name IS NOT NULL"
+  ).all(uid);
+  for (const { group_name } of accountGroups) {
+    db.prepare('INSERT OR IGNORE INTO user_groups (user_id, name) VALUES (?, ?)').run(uid, group_name);
+  }
+
   const rows = db.prepare(`
-    SELECT group_name, COUNT(*) as count
-    FROM accounts WHERE user_id = ?
-    GROUP BY group_name ORDER BY group_name
-  `).all(req.user.id);
+    SELECT ug.name as group_name, COUNT(a.id) as count
+    FROM user_groups ug
+    LEFT JOIN accounts a ON a.group_name = ug.name AND a.user_id = ug.user_id
+    WHERE ug.user_id = ?
+    GROUP BY ug.name ORDER BY ug.name
+  `).all(uid);
   res.json(rows);
 });
 
 app.post('/api/groups', requireAuth, (req, res) => {
   const { name } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
-  res.json({ success: true, name: name.trim() });
+  try {
+    db.prepare('INSERT INTO user_groups (user_id, name) VALUES (?, ?)').run(req.user.id, name.trim());
+    res.json({ success: true, name: name.trim() });
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(409).json({ error: 'Group already exists' });
+    throw err;
+  }
 });
 
 app.delete('/api/groups/:name', requireAuth, (req, res) => {
   const groupName = decodeURIComponent(req.params.name);
-  db.prepare("UPDATE accounts SET group_name = 'Default' WHERE group_name = ? AND user_id = ?")
-    .run(groupName, req.user.id);
+  const uid = req.user.id;
+  db.prepare("UPDATE accounts SET group_name = 'Default' WHERE group_name = ? AND user_id = ?").run(groupName, uid);
+  db.prepare("DELETE FROM user_groups WHERE name = ? AND user_id = ?").run(groupName, uid);
   res.json({ success: true });
 });
 

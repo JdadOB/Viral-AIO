@@ -125,6 +125,17 @@ try { db.exec('ALTER TABLE agent_outputs ADD COLUMN user_id INTEGER REFERENCES u
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE (user_id, name),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',

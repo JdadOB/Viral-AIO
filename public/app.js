@@ -585,51 +585,59 @@ async function renderCompetitors() {
 }
 
 async function loadGroupPanel() {
-  const groups = await api('/api/groups');
-  const accounts = await api('/api/accounts');
+  const [groups, accounts] = await Promise.all([api('/api/groups'), api('/api/accounts')]);
   const el = $('#group-list');
   if (!el) return;
 
-  // Populate group suggestions datalist
+  // Keep datalist fresh for the add-creator input
   const dl = $('#group-suggestions');
   if (dl) dl.innerHTML = groups.map(g => `<option value="${g.group_name}">`).join('');
 
   if (!groups.length) {
-    el.innerHTML = '<div style="font-size:13px;color:var(--text-sub)">No groups yet — add creators with a group name to create one.</div>';
+    el.innerHTML = '<div style="font-size:13px;color:var(--text-sub);padding:8px 0">No groups yet — type a group name above and click Create Group.</div>';
     return;
   }
 
-  el.innerHTML = groups.map(g => `
-    <div class="group-row">
-      <div style="display:flex;align-items:center;gap:10px;flex:1">
-        <span class="group-name-badge">${g.group_name}</span>
-        <span style="font-size:12px;color:var(--text-sub)">${g.count} creator${g.count !== 1 ? 's' : ''}</span>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        ${accounts.filter(a => a.group_name === g.group_name).map(a => `
-          <div class="group-member-chip" data-account-id="${a.id}" data-username="${a.username}">
-            @${a.username}
-            <select class="group-member-select" data-id="${a.id}" title="Move to group">
-              ${groups.map(gg => `<option value="${gg.group_name}" ${gg.group_name === g.group_name ? 'selected' : ''}>${gg.group_name}</option>`).join('')}
-            </select>
+  el.innerHTML = groups.map(g => {
+    const members = accounts.filter(a => a.group_name === g.group_name);
+    const groupOptions = groups.map(gg =>
+      `<option value="${gg.group_name}" ${gg.group_name === g.group_name ? 'selected' : ''}>${gg.group_name}</option>`
+    ).join('');
+
+    return `
+      <div class="group-row">
+        <div class="group-row-header">
+          <span class="group-name-badge">${g.group_name}</span>
+          <span style="font-size:12px;color:var(--text-sub)">${g.count} creator${g.count !== 1 ? 's' : ''}</span>
+          ${g.group_name !== 'Default' ? `<button class="btn btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" data-delete-group="${g.group_name}">Delete</button>` : ''}
+        </div>
+        ${members.length ? `
+          <div class="group-members-list">
+            ${members.map(a => `
+              <div class="group-member-row">
+                <span style="font-size:13px;color:var(--text-main);min-width:0;overflow:hidden;text-overflow:ellipsis">@${a.username}</span>
+                <select class="group-member-select" data-id="${a.id}" title="Move to group">
+                  ${groupOptions}
+                </select>
+              </div>
+            `).join('')}
           </div>
-        `).join('')}
+        ` : `<div style="font-size:12px;color:var(--text-dim);padding:6px 0">No creators in this group yet.</div>`}
       </div>
-      ${g.group_name !== 'Default' ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:11px" data-delete-group="${g.group_name}">Delete Group</button>` : ''}
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   el.querySelectorAll('.group-member-select').forEach(sel => {
     sel.addEventListener('change', async () => {
-      const id = sel.dataset.id;
       const newGroup = sel.value;
       try {
-        await api(`/api/accounts/${id}`, { method: 'PATCH', body: { group_name: newGroup } });
-        toast('Group updated', 'success');
+        await api(`/api/accounts/${sel.dataset.id}`, { method: 'PATCH', body: { group_name: newGroup } });
+        toast('Creator moved', 'success');
         loadGroupPanel();
         loadAccounts();
       } catch (err) {
         toast(err.message, 'error');
+        sel.value = sel.querySelector('option[selected]')?.value || sel.options[0].value;
       }
     });
   });
