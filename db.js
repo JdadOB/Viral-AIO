@@ -121,8 +121,44 @@ try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(go
 try { db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
+
+// ── RBAC: role column ─────────────────────────────────────────────────────────
+try { db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'client'"); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+// Sync role from legacy is_admin flag for existing rows
+db.prepare("UPDATE users SET role = 'admin' WHERE is_admin = 1 AND (role IS NULL OR role = 'client')").run();
+db.prepare("UPDATE users SET role = 'client' WHERE role IS NULL").run();
+
 // Ensure the operator account is always an admin
-db.prepare("UPDATE users SET is_admin = 1 WHERE email = 'jonadkins03@gmail.com'").run();
+db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE email = 'jonadkins03@gmail.com'").run();
+
+// ── RBAC: manager → client assignments ───────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS manager_clients (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    manager_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    assigned_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(manager_id, client_id)
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_mc_manager ON manager_clients(manager_id)'); } catch (e) {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_mc_client  ON manager_clients(client_id)');  } catch (e) {}
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    user_name  TEXT,
+    user_role  TEXT,
+    action     TEXT NOT NULL,
+    details    TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC)'); } catch (e) {}
 try { db.exec('ALTER TABLE accounts ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }

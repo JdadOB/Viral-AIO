@@ -44,34 +44,15 @@
       </div>
 
       <div class="nav-label">Navigation</div>
-      <nav class="nav">
-        <a class="nav-item active" data-page="dashboard" href="#dashboard">
-          <span class="nav-icon">&#9632;</span>
-          <span class="nav-text">Intelligence Hub</span>
-          <span class="badge" id="unread-badge"></span>
-        </a>
-        <a class="nav-item" data-page="competitors" href="#competitors">
-          <span class="nav-icon">&#9650;</span>
-          <span class="nav-text">Creator Roster</span>
-          <span class="account-count" id="account-count"></span>
-        </a>
-        <a class="nav-item" data-page="agents" href="#agents">
-          <span class="nav-icon">&#9670;</span>
-          <span class="nav-text">Command Center</span>
-        </a>
-        <a class="nav-item" data-page="brain" href="#brain">
-          <span class="nav-icon">&#9880;</span>
-          <span class="nav-text">The Brain</span>
-        </a>
-        <a class="nav-item" data-page="settings" href="#settings">
-          <span class="nav-icon">&#9711;</span>
-          <span class="nav-text">Settings</span>
-        </a>
-        <a class="nav-item" id="nav-admin" data-page="admin" href="#admin" style="display:none">
-          <span class="nav-icon">&#9760;</span>
-          <span class="nav-text">Admin</span>
-        </a>
+      <nav class="nav" id="main-nav">
+        <!-- populated by applyRoleNav() after /api/me resolves -->
       </nav>
+
+      <!-- Client workspace switcher — visible to managers/admins only -->
+      <div id="client-switcher" style="display:none;padding:8px 10px 0">
+        <div class="nav-label" style="padding-bottom:4px">Workspace</div>
+        <select id="client-select" class="agent-select" style="width:100%;font-size:12px;padding:6px 10px"></select>
+      </div>
 
       <div class="nav-label" style="margin-top:12px">Actions</div>
       <div class="sidebar-ops">
@@ -86,6 +67,7 @@
         <div class="operator-info" id="operator-info" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
           <div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Operator</div>
           <div style="font-size:13px;font-weight:500;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="operator-name">—</div>
+          <div style="margin-top:4px"><span id="operator-role" class="role-badge"></span></div>
           <a href="/auth/logout" style="display:inline-block;margin-top:5px;font-size:11px;color:var(--text-dim);transition:color 0.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-dim)'">Sign out</a>
         </div>
         <div class="sys-status">
@@ -102,6 +84,7 @@
 
     <!-- MAIN CONTENT -->
     <main class="main">
+      <div id="client-banner" class="client-workspace-banner"></div>
       <div id="page-dashboard" class="page"></div>
       <div id="page-competitors" class="page hidden"></div>
       <div id="page-agents" class="page hidden"></div>

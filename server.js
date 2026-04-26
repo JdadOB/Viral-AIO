@@ -76,6 +76,7 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(buildScopeMiddleware());
 
 function requireAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -84,8 +85,62 @@ function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (req.isAuthenticated() && req.user.is_admin) return next();
+  if (req.isAuthenticated() && (req.user.role === 'admin' || req.user.is_admin)) return next();
   res.status(403).json({ error: 'Forbidden' });
+}
+
+// ── RBAC helpers ──────────────────────────────────────────────────────────────
+
+function userRole(user) {
+  if (!user) return null;
+  return user.role || (user.is_admin ? 'admin' : 'client');
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
+    if (!roles.includes(userRole(req.user))) return res.status(403).json({ error: 'Forbidden' });
+    next();
+  };
+}
+
+const requireManager    = requireRole('admin', 'manager');
+const requireClientOrUp = requireRole('admin', 'manager', 'client');
+
+// Resolve which user's data to scope to.
+// Managers pass ?as=CLIENT_ID to view a client's workspace.
+// Applied globally so every authenticated route inherits req.scopedUserId.
+function buildScopeMiddleware() {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) { req.scopedUserId = null; return next(); }
+    const role = userRole(req.user);
+    const asId = req.query.as ? parseInt(req.query.as) : null;
+    if (!asId || isNaN(asId)) { req.scopedUserId = req.user.id; return next(); }
+    if (role === 'admin') { req.scopedUserId = asId; return next(); }
+    if (role === 'manager') {
+      const link = db.prepare('SELECT 1 FROM manager_clients WHERE manager_id = ? AND client_id = ?').get(req.user.id, asId);
+      if (!link) return res.status(404).json({ error: 'Not found' });
+      req.scopedUserId = asId;
+      return next();
+    }
+    // clients cannot impersonate anyone
+    req.scopedUserId = req.user.id;
+    next();
+  };
+}
+
+function checkClientCap(req, res, next) {
+  if (userRole(req.user) !== 'manager') return next();
+  const { count } = db.prepare('SELECT COUNT(*) as count FROM manager_clients WHERE manager_id = ?').get(req.user.id);
+  if (count >= 10) return res.status(403).json({ error: 'Client limit reached — managers may manage a maximum of 10 clients.' });
+  next();
+}
+
+function logActivity(userId, userName, role, action, details = null) {
+  try {
+    db.prepare('INSERT INTO activity_log (user_id, user_name, user_role, action, details) VALUES (?, ?, ?, ?, ?)')
+      .run(userId || null, userName || null, role || null, action, details ? JSON.stringify(details) : null);
+  } catch (e) { /* non-critical */ }
 }
 
 // Serve static assets without auth (CSS, JS, etc.)
@@ -106,7 +161,8 @@ app.post('/auth/login', (req, res, next) => {
     if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
     req.login(user, err => {
       if (err) return next(err);
-      res.json({ success: true });
+      logActivity(user.id, user.name, userRole(user), 'login');
+      res.json({ success: true, role: userRole(user) });
     });
   })(req, res, next);
 });
@@ -123,35 +179,124 @@ app.get('/auth/logout', (req, res) => {
 
 app.get('/api/me', requireAuth, (req, res) => {
   const { id, email, name, avatar_url, is_admin } = req.user;
-  res.json({ id, email, name, avatar_url, is_admin: !!is_admin });
+  const role = userRole(req.user);
+  res.json({ id, email, name, avatar_url, is_admin: !!is_admin, role });
 });
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
-  const users = db.prepare('SELECT id, name, email, is_admin, created_at FROM users ORDER BY created_at ASC').all();
+  const users = db.prepare(`
+    SELECT u.id, u.name, u.email, u.is_admin, u.role, u.created_at,
+      (SELECT COUNT(*) FROM manager_clients WHERE manager_id = u.id) as client_count
+    FROM users u ORDER BY u.created_at ASC
+  `).all();
   res.json(users);
 });
 
 app.post('/api/admin/users', requireAdmin, (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, password, name, role = 'client' } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error: 'Name, email, and password are required' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (!['admin', 'manager', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
   if (existing) return res.status(409).json({ error: 'Email already registered' });
   const hash = bcrypt.hashSync(password, 10);
+  const isAdmin = role === 'admin' ? 1 : 0;
   const { lastInsertRowid } = db.prepare(
-    'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
-  ).run(email.toLowerCase().trim(), hash, name.trim());
+    'INSERT INTO users (email, password_hash, name, role, is_admin) VALUES (?, ?, ?, ?, ?)'
+  ).run(email.toLowerCase().trim(), hash, name.trim(), role, isAdmin);
   seedUserDefaults(lastInsertRowid);
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'user_created', { newUser: name.trim(), role });
   res.json({ success: true, id: lastInsertRowid });
+});
+
+app.patch('/api/admin/users/:id/role', requireAdmin, (req, res) => {
+  const targetId = parseInt(req.params.id);
+  const { role } = req.body;
+  if (!['admin', 'manager', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot change your own role' });
+  const isAdmin = role === 'admin' ? 1 : 0;
+  db.prepare('UPDATE users SET role = ?, is_admin = ? WHERE id = ?').run(role, isAdmin, targetId);
+  if (role !== 'manager') db.prepare('DELETE FROM manager_clients WHERE manager_id = ?').run(targetId);
+  const target = db.prepare('SELECT name FROM users WHERE id = ?').get(targetId);
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'role_changed', { userId: targetId, userName: target?.name, newRole: role });
+  res.json({ success: true });
 });
 
 app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
   const targetId = parseInt(req.params.id);
   if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
+  const target = db.prepare('SELECT name FROM users WHERE id = ?').get(targetId);
   db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'user_deleted', { userId: targetId, userName: target?.name });
   res.json({ success: true });
+});
+
+// Manager ↔ Client assignment
+app.get('/api/admin/manager-clients/:managerId', requireAdmin, (req, res) => {
+  const managerId = parseInt(req.params.managerId);
+  const clients = db.prepare(`
+    SELECT u.id, u.name, u.email, mc.assigned_at
+    FROM manager_clients mc JOIN users u ON mc.client_id = u.id
+    WHERE mc.manager_id = ? ORDER BY mc.assigned_at ASC
+  `).all(managerId);
+  res.json(clients);
+});
+
+app.post('/api/admin/manager-clients', requireAdmin, checkClientCap, (req, res) => {
+  const { managerId, clientId } = req.body;
+  if (!managerId || !clientId) return res.status(400).json({ error: 'managerId and clientId required' });
+  const manager = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'manager'").get(managerId);
+  const client  = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'client'").get(clientId);
+  if (!manager) return res.status(400).json({ error: 'Manager not found' });
+  if (!client)  return res.status(400).json({ error: 'Client not found' });
+  try {
+    db.prepare('INSERT INTO manager_clients (manager_id, client_id) VALUES (?, ?)').run(managerId, clientId);
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'client_assigned', { managerId, clientId });
+    res.json({ success: true });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Already assigned' });
+    throw e;
+  }
+});
+
+// Middleware for checkClientCap needs to know which manager to check
+function checkClientCapForManager(req, res, next) {
+  const managerId = parseInt(req.body.managerId);
+  if (!managerId) return next();
+  const { count } = db.prepare('SELECT COUNT(*) as count FROM manager_clients WHERE manager_id = ?').get(managerId);
+  if (count >= 10) return res.status(403).json({ error: 'Client limit reached — managers may manage a maximum of 10 clients.' });
+  next();
+}
+
+app.delete('/api/admin/manager-clients/:managerId/:clientId', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM manager_clients WHERE manager_id = ? AND client_id = ?')
+    .run(parseInt(req.params.managerId), parseInt(req.params.clientId));
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'client_unassigned', { managerId: req.params.managerId, clientId: req.params.clientId });
+  res.json({ success: true });
+});
+
+// My clients (for manager sidebar switcher)
+app.get('/api/my-clients', requireManager, (req, res) => {
+  const role = userRole(req.user);
+  if (role === 'admin') {
+    const clients = db.prepare("SELECT id, name, email FROM users WHERE role = 'client' ORDER BY name ASC").all();
+    return res.json(clients);
+  }
+  const clients = db.prepare(`
+    SELECT u.id, u.name, u.email FROM manager_clients mc
+    JOIN users u ON mc.client_id = u.id
+    WHERE mc.manager_id = ? ORDER BY u.name ASC
+  `).all(req.user.id);
+  res.json(clients);
+});
+
+// Activity log (admin only)
+app.get('/api/admin/logs', requireAdmin, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const logs = db.prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?').all(limit);
+  res.json(logs);
 });
 
 // Main app — auth required
@@ -169,21 +314,22 @@ app.get('/api/accounts', requireAuth, (_req, res) => {
     FROM accounts a
     WHERE a.user_id = ?
     ORDER BY a.created_at DESC
-  `).all(_req.user.id);
+  `).all(_req.scopedUserId);
   res.json(rows);
 });
 
-app.post('/api/accounts', requireAuth, async (req, res) => {
+app.post('/api/accounts', requireManager, async (req, res) => {
   const { username, group_name } = req.body;
   if (!username) return res.status(400).json({ error: 'username required' });
 
   const clean = username.replace('@', '').toLowerCase().trim();
-  const exists = db.prepare('SELECT id FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.user.id);
+  const exists = db.prepare('SELECT id FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.scopedUserId);
   if (exists) return res.status(409).json({ error: 'Account already tracked' });
 
   const { lastInsertRowid: accountId } = db.prepare(
     'INSERT INTO accounts (username, group_name, user_id) VALUES (?, ?, ?)'
-  ).run(clean, group_name || 'Default', req.user.id);
+  ).run(clean, group_name || 'Default', req.scopedUserId);
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'account_added', { username: clean, scopedUserId: req.scopedUserId });
 
   res.status(202).json({ id: accountId, username: clean, message: 'Added — initial scrape running in background' });
 
@@ -199,34 +345,35 @@ app.post('/api/accounts', requireAuth, async (req, res) => {
   });
 });
 
-app.patch('/api/accounts/:id', requireAuth, (req, res) => {
+app.patch('/api/accounts/:id', requireManager, (req, res) => {
   const { group_name } = req.body;
-  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.scopedUserId);
   if (!account) return res.status(404).json({ error: 'Not found' });
   if (group_name !== undefined)
     db.prepare('UPDATE accounts SET group_name = ? WHERE id = ?').run(group_name, account.id);
   res.json(db.prepare('SELECT * FROM accounts WHERE id = ?').get(account.id));
 });
 
-app.post('/api/accounts/:id/poll', requireAuth, (req, res) => {
-  const account = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+app.post('/api/accounts/:id/poll', requireManager, (req, res) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.scopedUserId);
   if (!account) return res.status(404).json({ error: 'Not found' });
   res.json({ message: `Scanning @${account.username}` });
   const { pollAccount } = require('./scheduler');
   pollAccount(account).catch(console.error);
 });
 
-app.delete('/api/accounts/:id', requireAuth, (req, res) => {
-  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+app.delete('/api/accounts/:id', requireManager, (req, res) => {
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.scopedUserId);
   if (!account) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id);
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'account_deleted', { accountId: account.id });
   res.json({ success: true });
 });
 
-app.post('/api/accounts/bulk-delete', requireAuth, (req, res) => {
+app.post('/api/accounts/bulk-delete', requireManager, (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids[] required' });
-  const uid = req.user.id;
+  const uid = req.scopedUserId;
   let deleted = 0;
   const del = db.prepare('DELETE FROM accounts WHERE id = ? AND user_id = ?');
   for (const id of ids) {
@@ -239,14 +386,14 @@ app.post('/api/accounts/bulk-delete', requireAuth, (req, res) => {
 // ── Groups ────────────────────────────────────────────────────────────────────
 
 app.get('/api/groups', requireAuth, (req, res) => {
-  const uid = req.user.id;
+  const uid = req.scopedUserId;
 
   // Seed any account group_names that aren't in user_groups yet (migration for existing users)
   const accountGroups = db.prepare(
     "SELECT DISTINCT group_name FROM accounts WHERE user_id = ? AND group_name IS NOT NULL"
-  ).all(uid);
+  ).all(req.scopedUserId);
   for (const { group_name } of accountGroups) {
-    db.prepare('INSERT OR IGNORE INTO user_groups (user_id, name) VALUES (?, ?)').run(uid, group_name);
+    db.prepare('INSERT OR IGNORE INTO user_groups (user_id, name) VALUES (?, ?)').run(req.scopedUserId, group_name);
   }
 
   const rows = db.prepare(`
@@ -255,15 +402,15 @@ app.get('/api/groups', requireAuth, (req, res) => {
     LEFT JOIN accounts a ON a.group_name = ug.name AND a.user_id = ug.user_id
     WHERE ug.user_id = ?
     GROUP BY ug.name ORDER BY ug.name
-  `).all(uid);
+  `).all(req.scopedUserId);
   res.json(rows);
 });
 
-app.post('/api/groups', requireAuth, (req, res) => {
+app.post('/api/groups', requireManager, (req, res) => {
   const { name } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
   try {
-    db.prepare('INSERT INTO user_groups (user_id, name) VALUES (?, ?)').run(req.user.id, name.trim());
+    db.prepare('INSERT INTO user_groups (user_id, name) VALUES (?, ?)').run(req.scopedUserId, name.trim());
     res.json({ success: true, name: name.trim() });
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.status(409).json({ error: 'Group already exists' });
@@ -271,11 +418,10 @@ app.post('/api/groups', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/api/groups/:name', requireAuth, (req, res) => {
+app.delete('/api/groups/:name', requireManager, (req, res) => {
   const groupName = decodeURIComponent(req.params.name);
-  const uid = req.user.id;
-  db.prepare("UPDATE accounts SET group_name = 'Default' WHERE group_name = ? AND user_id = ?").run(groupName, uid);
-  db.prepare("DELETE FROM user_groups WHERE name = ? AND user_id = ?").run(groupName, uid);
+  db.prepare("UPDATE accounts SET group_name = 'Default' WHERE group_name = ? AND user_id = ?").run(groupName, req.scopedUserId);
+  db.prepare("DELETE FROM user_groups WHERE name = ? AND user_id = ?").run(groupName, req.scopedUserId);
   res.json({ success: true });
 });
 
@@ -308,7 +454,7 @@ app.get('/api/alerts', requireAuth, (req, res) => {
     WHERE acc.user_id = ? ${where} ${groupWhere}
     ORDER BY ${orderBy}
     LIMIT 200
-  `).all(...(group ? [req.user.id, group] : [req.user.id]));
+  `).all(...(group ? [req.scopedUserId, group] : [req.scopedUserId]));
 
   res.json(rows.map(r => {
     let brief = null;
@@ -320,23 +466,23 @@ app.get('/api/alerts', requireAuth, (req, res) => {
 });
 
 app.patch('/api/alerts/:id/viewed', requireAuth, (req, res) => {
-  db.prepare('UPDATE alerts SET viewed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.user.id);
+  db.prepare('UPDATE alerts SET viewed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.scopedUserId);
   res.json({ success: true });
 });
 
 app.patch('/api/alerts/:id/acted-on', requireAuth, (req, res) => {
   const { acted_on } = req.body;
-  db.prepare('UPDATE alerts SET acted_on = ? WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(acted_on ? 1 : 0, req.params.id, req.user.id);
+  db.prepare('UPDATE alerts SET acted_on = ? WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(acted_on ? 1 : 0, req.params.id, req.scopedUserId);
   res.json({ success: true });
 });
 
 app.patch('/api/alerts/:id/dismiss', requireAuth, (req, res) => {
-  db.prepare('UPDATE alerts SET dismissed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.user.id);
+  db.prepare('UPDATE alerts SET dismissed = 1 WHERE id = ? AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.params.id, req.scopedUserId);
   res.json({ success: true });
 });
 
 app.delete('/api/alerts/acted-on', requireAuth, (req, res) => {
-  const info = db.prepare('UPDATE alerts SET dismissed = 1 WHERE acted_on = 1 AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.user.id);
+  const info = db.prepare('UPDATE alerts SET dismissed = 1 WHERE acted_on = 1 AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)').run(req.scopedUserId);
   res.json({ success: true, dismissed: info.changes });
 });
 
@@ -359,11 +505,11 @@ app.post('/api/browser-scrape', requireAuth, (req, res) => {
 
   const clean = username.replace('@', '').toLowerCase().trim();
 
-  let account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.user.id);
+  let account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(clean, req.scopedUserId);
   if (!account) {
     const { lastInsertRowid } = db.prepare(
       'INSERT INTO accounts (username, group_name, followers_count, full_name, profile_pic_url, user_id) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(clean, 'Default', followers_count || 0, full_name || null, profile_pic_url || null, req.user.id);
+    ).run(clean, 'Default', followers_count || 0, full_name || null, profile_pic_url || null, req.scopedUserId);
     account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(lastInsertRowid);
   } else if (followers_count) {
     db.prepare('UPDATE accounts SET followers_count = ?, full_name = COALESCE(?, full_name), profile_pic_url = COALESCE(?, profile_pic_url) WHERE id = ?')
@@ -394,7 +540,7 @@ app.post('/api/browser-scrape', requireAuth, (req, res) => {
 
 // ── Poll ──────────────────────────────────────────────────────────────────────
 
-app.post('/api/poll', requireAuth, (req, res) => {
+app.post('/api/poll', requireManager, (req, res) => {
   res.json({ message: 'Poll started' });
   pollAllAccounts().catch(console.error);
 });
@@ -437,18 +583,18 @@ app.get('/api/img', (req, res) => {
 app.get('/api/stats', requireAuth, (req, res) => {
   const uid = req.user.id;
   res.json({
-    totalAccounts: db.prepare('SELECT COUNT(*) as c FROM accounts WHERE user_id = ?').get(uid).c,
-    totalAlerts:   db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(uid).c,
-    unreadAlerts:  db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.viewed = 0').get(uid).c,
-    actedOn:       db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.acted_on = 1').get(uid).c,
-    totalBriefs:   db.prepare('SELECT COUNT(*) as c FROM briefs b JOIN alerts al ON b.alert_id = al.id JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(uid).c,
+    totalAccounts: db.prepare('SELECT COUNT(*) as c FROM accounts WHERE user_id = ?').get(req.scopedUserId).c,
+    totalAlerts:   db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(req.scopedUserId).c,
+    unreadAlerts:  db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.viewed = 0').get(req.scopedUserId).c,
+    actedOn:       db.prepare('SELECT COUNT(*) as c FROM alerts al JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ? AND al.acted_on = 1').get(req.scopedUserId).c,
+    totalBriefs:   db.prepare('SELECT COUNT(*) as c FROM briefs b JOIN alerts al ON b.alert_id = al.id JOIN accounts acc ON al.account_id = acc.id WHERE acc.user_id = ?').get(req.scopedUserId).c,
   });
 });
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-app.get('/api/settings', requireAuth, (req, res) => {
-  const uid = req.user.id;
+app.get('/api/settings', requireManager, (req, res) => {
+  const uid = req.scopedUserId;
   res.json({
     polling_interval_minutes:    getUserSetting(uid, 'polling_interval_minutes'),
     viral_threshold_multiplier:  getUserSetting(uid, 'viral_threshold_multiplier'),
@@ -460,8 +606,9 @@ app.get('/api/settings', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/settings', requireAuth, (req, res) => {
-  const uid = req.user.id;
+app.post('/api/settings', requireManager, (req, res) => {
+  const uid = req.scopedUserId;
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'settings_changed');
   const {
     polling_interval_minutes, viral_threshold_multiplier, velocity_threshold,
     discord_channel_id, discord_digest_enabled, discord_digest_time,
@@ -487,7 +634,8 @@ app.post('/api/discord/test', requireAuth, async (req, res) => {
 app.post('/api/agents/strategist', requireAuth, async (req, res) => {
   try {
     const { days = 7 } = req.body;
-    const result = await runStrategist({ days: parseInt(days), userId: req.user.id });
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'agent_run', { agent: 'strategist', scopedUserId: req.scopedUserId });
+    const result = await runStrategist({ days: parseInt(days), userId: req.scopedUserId });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Strategist]', err.message);
@@ -499,7 +647,8 @@ app.post('/api/agents/writer', requireAuth, async (req, res) => {
   try {
     const { username, contentGoal, viralCaption } = req.body;
     if (!username) return res.status(400).json({ error: 'username required' });
-    const result = await runWriter({ username, contentGoal, viralCaption, userId: req.user.id });
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'agent_run', { agent: 'writer', username });
+    const result = await runWriter({ username, contentGoal, viralCaption, userId: req.scopedUserId });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Writer]', err.message);
@@ -511,7 +660,7 @@ app.post('/api/agents/assistant', requireAuth, async (req, res) => {
   try {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: 'question required' });
-    const result = await runAssistant({ question, userId: req.user.id });
+    const result = await runAssistant({ question, userId: req.scopedUserId });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Assistant]', err.message);
@@ -538,7 +687,7 @@ app.post('/api/agents/captain', requireAuth, async (req, res) => {
 app.post('/api/agents/ideator', requireAuth, async (req, res) => {
   try {
     const { group } = req.body;
-    const result = await runIdeator({ group: group || null, userId: req.user.id });
+    const result = await runIdeator({ group: group || null, userId: req.scopedUserId });
     res.json(result);
   } catch (err) {
     console.error('[Agent:Ideator]', err.message);
@@ -555,18 +704,19 @@ app.get('/api/brain/profiles', requireAuth, (req, res) => {
     JOIN accounts a ON cp.account_id = a.id
     WHERE cp.user_id = ?
     ORDER BY a.username ASC
-  `).all(req.user.id);
+  `).all(req.scopedUserId);
   res.json(profiles);
 });
 
-app.delete('/api/brain/profiles/:accountId', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM creator_profiles WHERE account_id = ? AND user_id = ?').run(parseInt(req.params.accountId), req.user.id);
+app.delete('/api/brain/profiles/:accountId', requireManager, (req, res) => {
+  db.prepare('DELETE FROM creator_profiles WHERE account_id = ? AND user_id = ?').run(parseInt(req.params.accountId), req.scopedUserId);
   res.json({ success: true });
 });
 
-app.post('/api/brain/build', requireAuth, async (req, res) => {
+app.post('/api/brain/build', requireManager, async (req, res) => {
   const { accountId } = req.body;
-  const uid = req.user.id;
+  const uid = req.scopedUserId;
+  logActivity(req.user.id, req.user.name, userRole(req.user), 'brain_build', { accountId: accountId || 'all', scopedUserId: uid });
   try {
     if (accountId) {
       const result = await runProfileBuilder(parseInt(accountId), uid);
@@ -598,7 +748,7 @@ app.post('/api/brain/search', requireAuth, async (req, res) => {
     FROM creator_profiles cp
     JOIN accounts a ON cp.account_id = a.id
     WHERE cp.user_id = ?
-  `).all(req.user.id);
+  `).all(req.scopedUserId);
 
   if (!profiles.length) return res.json({ results: [] });
 
@@ -636,8 +786,8 @@ app.get('/api/agents/history', requireAuth, (req, res) => {
   const { agent } = req.query;
   const uid = req.user.id;
   const rows = agent
-    ? db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? AND agent = ? ORDER BY created_at DESC LIMIT 20').all(uid, agent)
-    : db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(uid);
+    ? db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? AND agent = ? ORDER BY created_at DESC LIMIT 20').all(req.scopedUserId, agent)
+    : db.prepare('SELECT * FROM agent_outputs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(req.scopedUserId);
   res.json(rows);
 });
 
