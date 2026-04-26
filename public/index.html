@@ -1,79 +1,82 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VIRAL TRACKER // CREATOR ANALYTICS</title>
+  <title>Viral Tracker — Creator Analytics</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="starfield" aria-hidden="true"></canvas>
-  <div class="scanlines" aria-hidden="true"></div>
-  <div class="noise" aria-hidden="true"></div>
 
   <div id="app">
 
-    <!-- SIDEBAR: Mission Control -->
+    <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="logo">
         <div class="logo-icon">
-          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="4" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
         </div>
         <div class="logo-text">
-          <span class="logo-title">VIRAL<span class="logo-accent">TRACK</span></span>
-          <span class="logo-sub">INTEL SYS v1.0</span>
+          <span class="logo-title">Viral<span class="logo-accent">Track</span></span>
+          <span class="logo-sub">Creator Intelligence</span>
         </div>
       </div>
 
-      <div class="nav-label">// SECTORS</div>
+      <div class="nav-label">Navigation</div>
       <nav class="nav">
         <a class="nav-item active" data-page="dashboard" href="#dashboard">
           <span class="nav-icon">&#9632;</span>
-          <span class="nav-text">INTELLIGENCE HUB</span>
+          <span class="nav-text">Intelligence Hub</span>
           <span class="badge" id="unread-badge"></span>
         </a>
         <a class="nav-item" data-page="competitors" href="#competitors">
           <span class="nav-icon">&#9650;</span>
-          <span class="nav-text">CREATOR ROSTER</span>
+          <span class="nav-text">Creator Roster</span>
           <span class="account-count" id="account-count"></span>
         </a>
         <a class="nav-item" data-page="agents" href="#agents">
-          <span class="nav-icon">&#9651;</span>
-          <span class="nav-text">COMMAND CENTER</span>
+          <span class="nav-icon">&#9670;</span>
+          <span class="nav-text">Command Center</span>
         </a>
         <a class="nav-item" data-page="settings" href="#settings">
-          <span class="nav-icon">&#9670;</span>
-          <span class="nav-text">MISSION CONFIG</span>
+          <span class="nav-icon">&#9711;</span>
+          <span class="nav-text">Settings</span>
         </a>
       </nav>
 
-      <div class="nav-label">// OPERATIONS</div>
+      <div class="nav-label" style="margin-top:12px">Actions</div>
       <div class="sidebar-ops">
         <button id="poll-btn" class="btn-poll">
           <span class="poll-icon">&#9654;</span>
-          EXECUTE SCAN
+          Execute Scan
         </button>
         <div class="poll-status" id="poll-status"></div>
       </div>
 
       <div class="sidebar-footer">
-        <div class="operator-info" id="operator-info" style="margin-bottom:0.75rem;padding-bottom:0.75rem;border-bottom:1px solid rgba(0,242,255,0.1);">
-          <div style="font-size:0.6rem;letter-spacing:0.15em;color:#4a5568;margin-bottom:0.3rem;">// OPERATOR</div>
-          <div style="font-size:0.75rem;color:#c8d6e5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="operator-name">—</div>
-          <a href="/auth/logout" style="display:inline-block;margin-top:0.4rem;font-size:0.6rem;letter-spacing:0.15em;color:#4a5568;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#ff00ff'" onmouseout="this.style.color='#4a5568'">[ LOGOUT ]</a>
+        <div class="operator-info" id="operator-info" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+          <div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Operator</div>
+          <div style="font-size:13px;font-weight:500;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="operator-name">—</div>
+          <a href="/auth/logout" style="display:inline-block;margin-top:5px;font-size:11px;color:var(--text-dim);transition:color 0.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-dim)'">Sign out</a>
         </div>
         <div class="sys-status">
           <span class="status-dot active"></span>
-          <span class="status-text">SYSTEM ONLINE</span>
+          <span class="status-text">System Online</span>
         </div>
         <div class="sys-time" id="sys-time"></div>
+        <button class="theme-toggle" id="theme-toggle">
+          <span class="theme-toggle-icon" id="theme-icon">☀️</span>
+          <span id="theme-label">Light mode</span>
+        </button>
       </div>
     </aside>
 
-    <!-- MAIN CONTENT AREA -->
+    <!-- MAIN CONTENT -->
     <main class="main">
       <div id="page-dashboard" class="page"></div>
       <div id="page-competitors" class="page hidden"></div>
@@ -83,48 +86,57 @@
 
   </div>
 
-  <!-- GLOBAL MISSION STATUS BAR -->
+  <!-- MISSION STATUS BAR -->
   <footer class="mission-bar">
     <div class="mission-stat">
-      <span class="ms-label">VIRAL ALERTS</span>
+      <span class="ms-label">Viral Alerts</span>
       <span class="ms-value" id="bar-alerts">0</span>
     </div>
     <div class="mission-stat">
-      <span class="ms-label">UNREAD INTEL</span>
+      <span class="ms-label">Unread</span>
       <span class="ms-value accent-magenta" id="bar-unread">0</span>
     </div>
     <div class="mission-stat">
-      <span class="ms-label">MISSIONS ACTED</span>
+      <span class="ms-label">Actioned</span>
       <span class="ms-value accent-green" id="bar-acted">0</span>
     </div>
     <div class="mission-stat">
-      <span class="ms-label">BRIEFS GENERATED</span>
+      <span class="ms-label">Briefs</span>
       <span class="ms-value accent-cyan" id="bar-briefs">0</span>
     </div>
     <div class="mission-stat">
-      <span class="ms-label">CREATORS TRACKED</span>
+      <span class="ms-label">Creators</span>
       <span class="ms-value" id="bar-accounts">0</span>
     </div>
     <div class="mission-ticker">
-      <span class="ticker-label">&#9608; FEED &gt;&gt;</span>
-      <span class="ticker-text" id="ticker-text">SYSTEM READY // AWAITING SCAN DATA // ADD CREATORS TO BEGIN TRACKING</span>
+      <span class="ticker-label">&#9654; Live</span>
+      <span class="ticker-text" id="ticker-text">System ready — add creators to begin tracking</span>
     </div>
   </footer>
 
-  <!-- TOAST ALERT -->
+  <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <!-- MODAL: Classified Brief -->
+  <!-- INTEL BRIEF MODAL -->
   <div id="modal-overlay" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <span class="modal-title">// CLASSIFIED INTEL BRIEF</span>
-        <button class="modal-close" id="modal-close">[ CLOSE ]</button>
+        <span class="modal-title">Intel Brief</span>
+        <button class="modal-close" id="modal-close">Close</button>
       </div>
       <div id="modal-body"></div>
     </div>
   </div>
 
+  <script>
+    // Theme toggle (runs before app.js to avoid flash)
+    (function() {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved || (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

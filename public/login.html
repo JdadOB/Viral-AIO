@@ -1,204 +1,206 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VIRAL TRACKER // ACCESS CONTROL</title>
+  <title>ViralTrack — Sign In</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --cyan: #00f2ff;
-      --magenta: #ff00ff;
-      --green: #00ff88;
-      --bg: #050508;
-      --surface: #0a0a12;
-      --border: rgba(0,242,255,0.15);
-      --text: #c8d6e5;
-      --dim: #4a5568;
+      --bg:            #121212;
+      --bg-2:          #1C1C1E;
+      --bg-3:          #2C2C2E;
+      --text-main:     #F2F2F7;
+      --text-sub:      #8E8E93;
+      --text-dim:      #48484A;
+      --accent:        #6366F1;
+      --accent-hover:  #4F46E5;
+      --accent-soft:   rgba(99,102,241,0.14);
+      --red:           #FF453A;
+      --border:        rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.15);
+      --font:          'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    [data-theme="light"] {
+      --bg:            #F8F9FA;
+      --bg-2:          #FFFFFF;
+      --bg-3:          #F1F3F5;
+      --text-main:     #1C1C1E;
+      --text-sub:      #6C6C70;
+      --text-dim:      #AEAEB2;
+      --accent:        #4F46E5;
+      --accent-hover:  #4338CA;
+      --accent-soft:   rgba(79,70,229,0.10);
+      --red:           #DC2626;
+      --border:        rgba(0,0,0,0.08);
+      --border-strong: rgba(0,0,0,0.15);
     }
 
     body {
       background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-main);
+      font-family: var(--font);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
-    }
-
-    canvas#starfield {
-      position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    }
-
-    .scanlines {
-      position: fixed; inset: 0; z-index: 1; pointer-events: none;
-      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.2s, color 0.2s;
     }
 
     .container {
-      position: relative; z-index: 2;
-      width: 100%; max-width: 420px;
-      padding: 1rem;
+      width: 100%;
+      max-width: 400px;
+      padding: 20px;
     }
 
     .logo {
       text-align: center;
-      margin-bottom: 2rem;
+      margin-bottom: 28px;
     }
-
-    .logo-title {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 1.8rem;
-      font-weight: 900;
-      letter-spacing: 0.15em;
+    .logo-icon {
+      width: 48px; height: 48px;
+      background: var(--accent);
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
       color: #fff;
     }
-
-    .logo-accent { color: var(--cyan); }
-
+    .logo-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text-main);
+      display: block;
+    }
+    .logo-accent { color: var(--accent); }
     .logo-sub {
       display: block;
-      font-size: 0.65rem;
-      letter-spacing: 0.3em;
-      color: var(--dim);
-      margin-top: 0.25rem;
+      font-size: 13px;
+      color: var(--text-sub);
+      margin-top: 4px;
     }
 
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 2rem;
-      box-shadow: 0 0 40px rgba(0,242,255,0.05), inset 0 1px 0 rgba(0,242,255,0.1);
+      background: var(--bg-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     }
 
     .tabs {
       display: flex;
-      gap: 0;
-      margin-bottom: 1.75rem;
-      border-bottom: 1px solid var(--border);
+      gap: 4px;
+      margin-bottom: 22px;
+      background: var(--bg-3);
+      border-radius: 10px;
+      padding: 4px;
     }
-
     .tab {
       flex: 1;
-      padding: 0.6rem;
+      padding: 8px;
       background: none;
       border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--dim);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      letter-spacing: 0.15em;
+      border-radius: 8px;
+      color: var(--text-sub);
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
       text-align: center;
     }
-
     .tab.active {
-      color: var(--cyan);
-      border-bottom-color: var(--cyan);
+      background: var(--bg-2);
+      color: var(--text-main);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
     }
 
-    .form-group { margin-bottom: 1.1rem; }
-
+    .form-group { margin-bottom: 14px; }
     label {
       display: block;
-      font-size: 0.65rem;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-      margin-bottom: 0.4rem;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
-
     input {
       width: 100%;
-      background: rgba(0,242,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      padding: 0.65rem 0.75rem;
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
+      background: var(--bg-3);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-family: var(--font);
+      font-size: 14px;
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-
     input:focus {
-      border-color: var(--cyan);
-      box-shadow: 0 0 0 2px rgba(0,242,255,0.1);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
     }
 
     .btn {
       width: 100%;
-      padding: 0.75rem;
-      background: transparent;
-      border: 1px solid var(--cyan);
-      border-radius: 2px;
-      color: var(--cyan);
-      font-family: 'Orbitron', sans-serif;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.2em;
+      padding: 11px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
-      margin-top: 0.5rem;
+      transition: background 0.2s, opacity 0.2s;
+      margin-top: 6px;
     }
-
-    .btn:hover {
-      background: rgba(0,242,255,0.1);
-      box-shadow: 0 0 20px rgba(0,242,255,0.2);
-    }
-
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .divider {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      margin: 1.25rem 0;
-      color: var(--dim);
-      font-size: 0.65rem;
-      letter-spacing: 0.1em;
+      gap: 10px;
+      margin: 18px 0;
+      color: var(--text-dim);
+      font-size: 12px;
     }
-
     .divider::before, .divider::after {
       content: '';
       flex: 1;
       height: 1px;
-      background: var(--border);
+      background: var(--border-strong);
     }
 
     .btn-google {
       width: 100%;
-      padding: 0.7rem;
+      padding: 10px;
       background: transparent;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 2px;
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      letter-spacing: 0.05em;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--text-main);
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.6rem;
+      gap: 8px;
     }
-
-    .btn-google:hover {
-      border-color: rgba(255,255,255,0.25);
-      background: rgba(255,255,255,0.04);
-    }
-
+    .btn-google:hover { background: var(--bg-3); border-color: var(--border-strong); }
     .btn-google.disabled {
       opacity: 0.35;
       cursor: not-allowed;
@@ -206,67 +208,85 @@
     }
 
     .error-msg {
-      background: rgba(255,60,60,0.08);
-      border: 1px solid rgba(255,60,60,0.3);
-      border-radius: 2px;
-      color: #ff6b6b;
-      font-size: 0.72rem;
-      padding: 0.6rem 0.75rem;
-      margin-top: 0.75rem;
+      background: rgba(255,69,58,0.08);
+      border: 1px solid rgba(255,69,58,0.25);
+      border-radius: 8px;
+      color: var(--red);
+      font-size: 13px;
+      padding: 10px 12px;
+      margin-top: 10px;
       display: none;
     }
-
     .error-msg.show { display: block; }
 
     .panel { display: none; }
     .panel.active { display: block; }
 
-    .sys-line {
-      font-size: 0.6rem;
-      color: var(--dim);
-      letter-spacing: 0.15em;
+    .footer-note {
+      font-size: 12px;
+      color: var(--text-dim);
       text-align: center;
-      margin-top: 1.25rem;
+      margin-top: 18px;
     }
+    .footer-note span { color: var(--accent); }
 
-    .sys-line span { color: var(--cyan); }
+    .theme-btn {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: var(--bg-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--text-sub);
+      font-family: var(--font);
+      font-size: 13px;
+      padding: 6px 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .theme-btn:hover { background: var(--bg-3); color: var(--text-main); }
   </style>
 </head>
 <body>
-  <canvas id="starfield"></canvas>
-  <div class="scanlines"></div>
+
+  <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">☀️ Light</button>
 
   <div class="container">
     <div class="logo">
-      <div class="logo-title">VIRAL<span class="logo-accent">TRACK</span></div>
-      <span class="logo-sub">// ACCESS CONTROL SYSTEM</span>
+      <div class="logo-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
+      <span class="logo-title">Viral<span class="logo-accent">Track</span></span>
+      <span class="logo-sub">Creator Intelligence Platform</span>
     </div>
 
     <div class="card">
       <div class="tabs">
-        <button class="tab active" onclick="switchTab('login')">[ LOGIN ]</button>
-        <button class="tab" onclick="switchTab('register')">[ REGISTER ]</button>
+        <button class="tab active" onclick="switchTab('login')">Sign In</button>
+        <button class="tab" onclick="switchTab('register')">Register</button>
       </div>
 
       <!-- LOGIN -->
       <div class="panel active" id="panel-login">
         <form id="form-login" onsubmit="doLogin(event)">
           <div class="form-group">
-            <label>// EMAIL</label>
-            <input type="email" id="login-email" placeholder="operator@domain.com" required autocomplete="email">
+            <label>Email</label>
+            <input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email">
           </div>
           <div class="form-group">
-            <label>// PASSWORD</label>
+            <label>Password</label>
             <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
           </div>
-          <button class="btn" type="submit" id="btn-login">AUTHENTICATE</button>
+          <button class="btn" type="submit" id="btn-login">Sign In</button>
           <div class="error-msg" id="login-error"></div>
         </form>
 
-        <div class="divider">OR</div>
+        <div class="divider">or</div>
         <button class="btn-google" id="btn-google-login" onclick="googleAuth()">
-          <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
-          CONTINUE WITH GOOGLE
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+          Continue with Google
         </button>
       </div>
 
@@ -274,68 +294,56 @@
       <div class="panel" id="panel-register">
         <form id="form-register" onsubmit="doRegister(event)">
           <div class="form-group">
-            <label>// OPERATOR NAME</label>
+            <label>Name</label>
             <input type="text" id="reg-name" placeholder="Your name" required autocomplete="name">
           </div>
           <div class="form-group">
-            <label>// EMAIL</label>
-            <input type="email" id="reg-email" placeholder="operator@domain.com" required autocomplete="email">
+            <label>Email</label>
+            <input type="email" id="reg-email" placeholder="you@example.com" required autocomplete="email">
           </div>
           <div class="form-group">
-            <label>// PASSWORD (MIN 8 CHARS)</label>
+            <label>Password (min 8 characters)</label>
             <input type="password" id="reg-password" placeholder="••••••••" required minlength="8" autocomplete="new-password">
           </div>
-          <button class="btn" type="submit" id="btn-register">CREATE ACCOUNT</button>
+          <button class="btn" type="submit" id="btn-register">Create Account</button>
           <div class="error-msg" id="register-error"></div>
         </form>
 
-        <div class="divider">OR</div>
+        <div class="divider">or</div>
         <button class="btn-google" id="btn-google-register" onclick="googleAuth()">
-          <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
-          CONTINUE WITH GOOGLE
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.566 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+          Continue with Google
         </button>
       </div>
     </div>
 
-    <div class="sys-line">SYS // <span>VIRALTRACK v1.0</span> // SECURE ACCESS REQUIRED</div>
+    <div class="footer-note">ViralTrack <span>v1.0</span> — Secure access required</div>
   </div>
 
   <script>
-    // Starfield (same as main app)
+    // Theme
     (function() {
-      const canvas = document.getElementById('starfield');
-      const ctx = canvas.getContext('2d');
-      let stars = [];
-      function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-      function init() {
-        stars = Array.from({ length: 120 }, () => ({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          r: Math.random() * 1.2,
-          o: Math.random() * 0.6 + 0.1,
-          s: Math.random() * 0.3 + 0.05,
-        }));
-      }
-      function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        stars.forEach(s => {
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(200,220,255,${s.o})`;
-          ctx.fill();
-          s.y -= s.s;
-          if (s.y < 0) { s.y = canvas.height; s.x = Math.random() * canvas.width; }
-        });
-        requestAnimationFrame(draw);
-      }
-      resize(); init(); draw();
-      window.addEventListener('resize', () => { resize(); init(); });
+      const saved = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved || (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+      updateThemeBtn(theme);
     })();
 
-    // Check if Google OAuth is configured
+    function updateThemeBtn(theme) {
+      const btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeBtn(next);
+    }
+
+    // Check Google OAuth configured
     fetch('/api/google-configured').then(r => r.json()).then(d => {
       if (!d.configured) {
         document.querySelectorAll('.btn-google').forEach(b => b.classList.add('disabled'));
@@ -353,7 +361,7 @@
       const err = document.getElementById('login-error');
       err.classList.remove('show');
       btn.disabled = true;
-      btn.textContent = 'AUTHENTICATING...';
+      btn.textContent = 'Signing in...';
       try {
         const res = await fetch('/auth/login', {
           method: 'POST',
@@ -372,7 +380,7 @@
         err.classList.add('show');
       }
       btn.disabled = false;
-      btn.textContent = 'AUTHENTICATE';
+      btn.textContent = 'Sign In';
     }
 
     async function doRegister(e) {
@@ -381,7 +389,7 @@
       const err = document.getElementById('register-error');
       err.classList.remove('show');
       btn.disabled = true;
-      btn.textContent = 'CREATING...';
+      btn.textContent = 'Creating account...';
       try {
         const res = await fetch('/auth/register', {
           method: 'POST',
@@ -401,7 +409,7 @@
         err.classList.add('show');
       }
       btn.disabled = false;
-      btn.textContent = 'CREATE ACCOUNT';
+      btn.textContent = 'Create Account';
     }
 
     function googleAuth() {
