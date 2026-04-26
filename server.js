@@ -559,6 +559,11 @@ app.get('/api/brain/profiles', requireAuth, (req, res) => {
   res.json(profiles);
 });
 
+app.delete('/api/brain/profiles/:accountId', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM creator_profiles WHERE account_id = ? AND user_id = ?').run(parseInt(req.params.accountId), req.user.id);
+  res.json({ success: true });
+});
+
 app.post('/api/brain/build', requireAuth, async (req, res) => {
   const { accountId } = req.body;
   const uid = req.user.id;

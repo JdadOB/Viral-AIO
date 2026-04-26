@@ -1405,6 +1405,12 @@ async function renderBrain() {
       </div>
       <button class="btn btn-accent" id="brain-build-all-btn" style="background:var(--purple);border-color:var(--purple)">Build All Profiles</button>
     </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <select id="brain-add-select" class="agent-select" style="flex:1;max-width:320px;min-width:180px">
+        <option value="">— Select a creator to add —</option>
+      </select>
+      <button class="btn btn-accent" id="brain-add-btn">Add to Brain</button>
+    </div>
     <div id="brain-status" style="display:none;padding:10px 14px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:13px;color:var(--accent);margin-bottom:16px"></div>
     <div id="brain-grid" class="brain-grid">
       <div style="color:var(--text-dim);font-size:13px;padding:40px 0;text-align:center">Loading profiles...</div>
@@ -1417,6 +1423,7 @@ async function renderBrain() {
     btn.disabled = true;
     btn.textContent = 'Building...';
     status.style.display = 'block';
+    status.style.color = 'var(--accent)';
     status.textContent = 'Running profile builder across all creators — this may take a minute...';
     try {
       const res = await api('/api/brain/build', { method: 'POST', body: {} });
@@ -1431,6 +1438,25 @@ async function renderBrain() {
     btn.textContent = 'Build All Profiles';
   });
 
+  $('#brain-add-btn').addEventListener('click', async () => {
+    const select = $('#brain-add-select');
+    const accountId = select.value;
+    if (!accountId) return toast('Select a creator first', 'error');
+    const btn = $('#brain-add-btn');
+    btn.disabled = true;
+    btn.textContent = 'Building...';
+    try {
+      await api('/api/brain/build', { method: 'POST', body: { accountId: parseInt(accountId) } });
+      toast('Profile built', 'success');
+      select.value = '';
+      loadBrainProfiles();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Add to Brain';
+  });
+
   loadBrainProfiles();
 }
 
@@ -1438,14 +1464,28 @@ async function loadBrainProfiles() {
   const grid = $('#brain-grid');
   if (!grid) return;
   try {
-    const profiles = await api('/api/brain/profiles');
+    const [profiles, accounts] = await Promise.all([
+      api('/api/brain/profiles'),
+      api('/api/accounts'),
+    ]);
+
+    // Populate add-selector with creators not yet in the brain
+    const profiledIds = new Set(profiles.map(p => p.account_id));
+    const select = $('#brain-add-select');
+    if (select) {
+      const unprofiledOptions = accounts
+        .filter(a => !profiledIds.has(a.id))
+        .map(a => `<option value="${a.id}">@${a.username}${a.group_name ? ` (${a.group_name})` : ''}</option>`)
+        .join('');
+      select.innerHTML = `<option value="">— Select a creator to add —</option>${unprofiledOptions}`;
+    }
 
     if (!profiles.length) {
       grid.innerHTML = `
         <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--text-dim)">
           <div style="font-size:32px;margin-bottom:12px">🧠</div>
           <div style="font-size:15px;font-weight:600;color:var(--text-sub);margin-bottom:6px">No profiles built yet</div>
-          <div style="font-size:13px">Click "Build All Profiles" to analyze your creators and generate intelligence profiles.</div>
+          <div style="font-size:13px">Select a creator above or click "Build All Profiles" to get started.</div>
         </div>`;
       return;
     }
@@ -1460,7 +1500,10 @@ async function loadBrainProfiles() {
             <div style="font-weight:600;font-size:14px;color:var(--text-main)">@${p.username}</div>
             <div style="font-size:12px;color:var(--text-dim)">${(p.followers_count||0).toLocaleString()} followers · ${p.group_name||'Ungrouped'}</div>
           </div>
-          <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--bg-3);color:var(--text-sub);border:1px solid var(--border-strong)" onclick="rebuildProfile(${p.account_id})">Rebuild</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--bg-3);color:var(--text-sub);border:1px solid var(--border-strong)" onclick="rebuildProfile(${p.account_id})">Rebuild</button>
+            <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--red-soft);color:var(--red);border:1px solid rgba(255,69,58,0.25)" onclick="removeProfile(${p.account_id}, '${p.username}')">Remove</button>
+          </div>
         </div>
 
         ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
@@ -1505,6 +1548,17 @@ async function rebuildProfile(accountId) {
   try {
     await api('/api/brain/build', { method: 'POST', body: { accountId } });
     toast('Profile rebuilt', 'success');
+    loadBrainProfiles();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function removeProfile(accountId, username) {
+  if (!confirm(`Remove @${username} from the Brain? Their intelligence profile will be deleted.`)) return;
+  try {
+    await api(`/api/brain/profiles/${accountId}`, { method: 'DELETE' });
+    toast(`@${username} removed from Brain`, 'success');
     loadBrainProfiles();
   } catch (err) {
     toast(err.message, 'error');
