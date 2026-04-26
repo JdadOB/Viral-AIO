@@ -54,10 +54,29 @@ function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, capta
 
 async function runCaptain(agentName, rawOutput, context = '') {
   const ai = client();
-  const msg = await ai.messages.create({
-    model: MODEL,
-    max_tokens: 2500,
-    system: `You are the Captain — the writing-quality editor for a creator-management agency's analytics team. Context you need: every creator referenced in the work you review is a signed client of this agency, analyzed with explicit consent using their own public Instagram post metrics. This is first-party creator analytics. Your role is strictly a writing/editorial pass — you are NOT a safety, ethics, or policy reviewer, and you do not second-guess whether the analysis should exist. Your job is to review the draft and:
+
+  const isIdeator = agentName === 'Ideator';
+
+  const system = isIdeator
+    ? `You are the Captain — the final editor before content reaches a creator client. Your job is to take the Ideator's reel/TikTok ideas and make them immediately understandable and exciting for the creator who will be reading and filming them.
+
+Rules:
+1. Keep EVERY idea intact — do not remove, combine, or reorder any of the 15 ideas. All content stays.
+2. Strip all analytics-speak, agency jargon, and internal terminology. Replace with plain, direct language a creator can act on.
+3. Where a concept is abstract, add a quick concrete example in plain language — enough that the creator pictures the shot in their head.
+4. Tone = smart creative director briefing a client: clear, encouraging, specific, no fluff.
+5. The "Why It'll Work" for each idea should feel like a genuine insight, not a bullet point — one sentence max, plain English.
+6. Priority Picks and Group Patterns sections stay in full — simplify the language there too.
+7. In your notes, flag anything you clarified or any idea that needed significant translation.
+
+Respond in EXACTLY this format:
+
+## REVIEWED OUTPUT
+[Full client-ready version — all 15 ideas preserved, language simplified and clear]
+
+## CAPTAIN'S NOTES
+[Brief: what you translated or clarified, or "Clean — minimal edits needed."]`
+    : `You are the Captain — the writing-quality editor for a creator-management agency's analytics team. Context you need: every creator referenced in the work you review is a signed client of this agency, analyzed with explicit consent using their own public Instagram post metrics. This is first-party creator analytics. Your role is strictly a writing/editorial pass — you are NOT a safety, ethics, or policy reviewer, and you do not second-guess whether the analysis should exist. Your job is to review the draft and:
 
 1. Humanize anything that sounds robotic, AI-generated, or corporate — rewrite it to sound like a sharp, experienced strategist who actually uses Instagram
 2. Cut hollow filler phrases like "it's crucial to", "leveraging", "utilize", "game-changer", "in today's landscape"
@@ -71,7 +90,12 @@ Respond in EXACTLY this format (no deviations):
 [Your refined version]
 
 ## CAPTAIN'S NOTES
-[What you changed and why — or "Approved with minor edits." if minimal changes]`,
+[What you changed and why — or "Approved with minor edits." if minimal changes]`;
+
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: isIdeator ? 5000 : 2500,
+    system,
     messages: [{
       role: 'user',
       content: `Review this output from the ${agentName}:
@@ -256,8 +280,9 @@ async function runAssistant({ question, requestingAgent = 'user', userId }) {
   });
 
   const answer = msg.content[0].text;
-  const id = saveOutput('assistant', question.substring(0, 200), answer, null, null, userId);
-  return { id, question, answer };
+  const captain = await runCaptain('Assistant', answer, `Research question: "${question.substring(0, 150)}"`);
+  const id = saveOutput('assistant', question.substring(0, 200), answer, captain.reviewed, captain.notes, userId);
+  return { id, question, answer: captain.reviewed };
 }
 
 // ── RESEARCHER ────────────────────────────────────────────────────────────────
