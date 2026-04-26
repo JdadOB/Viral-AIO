@@ -2200,7 +2200,7 @@ async function adminDeleteUser(id, name) {
 
 // ── Messages (Chat) ───────────────────────────────────────────────────────────
 
-let chatState = { roomId: null, lastId: 0, pollTimer: null };
+let chatState = { roomId: null, lastId: 0, pollTimer: null, sidebarTimer: null };
 
 function renderMessages() {
   const pg = $('#page-messages');
@@ -2220,10 +2220,16 @@ function renderMessages() {
         </div>
       </div>
     </div>`;
-  loadChatRooms();
+  // Auto-open the most recent unread conversation on first load
+  loadChatRooms(true);
+  // Refresh the sidebar every 4s so new message previews + unread counts stay live
+  chatState.sidebarTimer = setInterval(() => {
+    if (currentPage !== 'messages') { clearInterval(chatState.sidebarTimer); return; }
+    loadChatRooms(false);
+  }, 4000);
 }
 
-async function loadChatRooms() {
+async function loadChatRooms(autoOpenUnread = false) {
   try {
     const [rooms, peers] = await Promise.all([
       fetch('/api/chat/rooms').then(r => r.json()),
@@ -2235,6 +2241,7 @@ async function loadChatRooms() {
     for (const r of rooms) roomsByPeer[r.peer_id] = r;
 
     const listEl = $('#chat-room-list');
+    if (!listEl) return;
     if (!peers.length) {
       listEl.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim)">No contacts yet.</div>';
       return;
@@ -2254,13 +2261,21 @@ async function loadChatRooms() {
       </div>`;
     }).join('');
 
-    // If a room is already open, keep it open
+    // If a room is already open, restore active highlight
     if (chatState.roomId) {
       const cur = rooms.find(r => r.id === chatState.roomId);
       if (cur) document.querySelector(`.chat-room-item[data-peer="${cur.peer_id}"]`)?.classList.add('active');
+    } else if (autoOpenUnread) {
+      // Auto-open the room with the most recent unread message
+      const unreadRoom = rooms.find(r => r.unread_count > 0) || rooms[0];
+      if (unreadRoom) {
+        const peer = peers.find(p => p.id === unreadRoom.peer_id);
+        if (peer) openRoom(peer.id, peer.name);
+      }
     }
   } catch (e) {
-    $('#chat-room-list').innerHTML = `<div style="padding:16px;font-size:12px;color:var(--red)">${e.message}</div>`;
+    const listEl = $('#chat-room-list');
+    if (listEl) listEl.innerHTML = `<div style="padding:16px;font-size:12px;color:var(--red)">${e.message}</div>`;
   }
 }
 
@@ -2309,7 +2324,17 @@ async function openRoom(peerId, peerName) {
 
 async function loadMessages(roomId, since = 0) {
   try {
-    const msgs = await fetch(`/api/chat/rooms/${roomId}/messages?since=${since}`).then(r => r.json());
+    const res  = await fetch(`/api/chat/rooms/${roomId}/messages?since=${since}`);
+    const data = await res.json();
+    // If the server returned an error (e.g. 404), bail out visibly
+    if (!res.ok || !Array.isArray(data)) {
+      if (since === 0) {
+        const container = $('#chat-messages');
+        if (container) container.innerHTML = `<div class="chat-no-msgs" style="color:var(--red)">${data?.error || 'Failed to load messages'}</div>`;
+      }
+      return;
+    }
+    const msgs = data;
     const container = $('#chat-messages');
     if (!container) return;
 
@@ -2335,7 +2360,7 @@ async function loadMessages(roomId, since = 0) {
     }
     chatState.lastId = msgs[msgs.length - 1].id;
     container.scrollTop = container.scrollHeight;
-  } catch { /* ignore */ }
+  } catch (e) { console.error('[chat] loadMessages error:', e); }
 }
 
 function escapeHtml(s) {
