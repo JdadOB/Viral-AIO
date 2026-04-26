@@ -420,6 +420,9 @@ async function handleAlertAction(e) {
 
 // ── Competitors ───────────────────────────────────────────────────────────────
 
+let selectMode = false;
+let selectedIds = new Set();
+
 async function renderCompetitors() {
   const el = $('#page-competitors');
   el.innerHTML = `
@@ -429,6 +432,8 @@ async function renderCompetitors() {
         <div class="page-subtitle">Tracked creator registry</div>
       </div>
     </div>
+
+    <!-- Add creator form -->
     <div class="add-account-form">
       <div class="input-row">
         <div class="input-group" style="max-width:220px">
@@ -437,7 +442,8 @@ async function renderCompetitors() {
         </div>
         <div class="input-group" style="max-width:200px">
           <label>Group</label>
-          <input type="text" id="add-group" placeholder="e.g. Tier 1 Clients">
+          <input type="text" id="add-group" placeholder="e.g. Tier 1 Clients" list="group-suggestions">
+          <datalist id="group-suggestions"></datalist>
         </div>
         <div style="padding-top:22px">
           <button class="btn btn-accent" id="add-btn">Add Creator</button>
@@ -467,10 +473,46 @@ async function renderCompetitors() {
       </div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:10px">Use <strong style="color:var(--magenta)">18+ Bypass</strong> for age-restricted profiles that Apify cannot access.</div>
     </div>
+
+    <!-- Group management panel -->
+    <div class="group-panel" id="group-panel">
+      <div class="group-panel-header" id="group-panel-toggle">
+        <span style="font-weight:600;font-size:13px">Manage Groups</span>
+        <span style="font-size:11px;color:var(--text-sub)" id="group-panel-caret">▼ Expand</span>
+      </div>
+      <div id="group-panel-body" style="display:none;padding:16px;border-top:1px solid var(--border)">
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end">
+          <div class="input-group" style="max-width:220px">
+            <label>New Group Name</label>
+            <input type="text" id="new-group-name" placeholder="e.g. VIP Clients">
+          </div>
+          <button class="btn btn-accent" id="create-group-btn">Create Group</button>
+        </div>
+        <div id="group-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+    </div>
+
+    <!-- Bulk action bar (shown in select mode) -->
+    <div id="bulk-action-bar" class="bulk-action-bar" style="display:none">
+      <span id="select-count" style="font-size:13px;font-weight:600;color:var(--text-main)">0 selected</span>
+      <button class="btn btn-danger" id="delete-selected-btn">Delete Selected</button>
+      <button class="btn" id="cancel-select-btn">Cancel</button>
+    </div>
+
+    <!-- Toolbar -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div id="roster-filter-tabs" class="filter-tabs" style="margin-bottom:0"></div>
+      <button class="btn" id="select-mode-btn" style="border-color:var(--border-strong);white-space:nowrap">Select</button>
+    </div>
+
     <div id="targets-grid" class="targets-grid">
       <div class="empty-state"><span class="spinner"></span></div>
     </div>
   `;
+
+  // Reset selection state
+  selectMode = false;
+  selectedIds = new Set();
 
   $('#add-btn').addEventListener('click', addAccount);
   $('#add-username').addEventListener('keydown', e => { if (e.key === 'Enter') addAccount(); });
@@ -484,30 +526,187 @@ async function renderCompetitors() {
 
   $('#bulk-add-btn').addEventListener('click', bulkAddAccounts);
 
+  // Group panel toggle
+  $('#group-panel-toggle').addEventListener('click', () => {
+    const body = $('#group-panel-body');
+    const caret = $('#group-panel-caret');
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    caret.textContent = open ? '▼ Expand' : '▲ Collapse';
+    if (!open) loadGroupPanel();
+  });
+
+  // Create group
+  $('#create-group-btn').addEventListener('click', async () => {
+    const name = $('#new-group-name').value.trim();
+    if (!name) return toast('Enter a group name', 'error');
+    await api('/api/groups', { method: 'POST', body: { name } });
+    $('#new-group-name').value = '';
+    toast(`Group "${name}" created`, 'success');
+    loadGroupPanel();
+    loadAccounts();
+  });
+
+  // Select mode
+  $('#select-mode-btn').addEventListener('click', () => {
+    selectMode = !selectMode;
+    selectedIds = new Set();
+    $('#select-mode-btn').textContent = selectMode ? 'Cancel Select' : 'Select';
+    $('#bulk-action-bar').style.display = selectMode ? 'flex' : 'none';
+    loadAccounts();
+  });
+
+  $('#delete-selected-btn')?.addEventListener('click', async () => {
+    if (!selectedIds.size) return;
+    if (!confirm(`Delete ${selectedIds.size} creator${selectedIds.size !== 1 ? 's' : ''} and all their data?`)) return;
+    try {
+      const result = await api('/api/accounts/bulk-delete', { method: 'POST', body: { ids: [...selectedIds] } });
+      toast(`${result.deleted} creator${result.deleted !== 1 ? 's' : ''} deleted`, 'success');
+      selectMode = false;
+      selectedIds = new Set();
+      $('#bulk-action-bar').style.display = 'none';
+      $('#select-mode-btn').textContent = 'Select';
+      loadAccounts();
+      updateStats();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  $('#cancel-select-btn')?.addEventListener('click', () => {
+    selectMode = false;
+    selectedIds = new Set();
+    $('#bulk-action-bar').style.display = 'none';
+    $('#select-mode-btn').textContent = 'Select';
+    loadAccounts();
+  });
+
   loadAccounts();
 }
+
+async function loadGroupPanel() {
+  const groups = await api('/api/groups');
+  const accounts = await api('/api/accounts');
+  const el = $('#group-list');
+  if (!el) return;
+
+  // Populate group suggestions datalist
+  const dl = $('#group-suggestions');
+  if (dl) dl.innerHTML = groups.map(g => `<option value="${g.group_name}">`).join('');
+
+  if (!groups.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text-sub)">No groups yet — add creators with a group name to create one.</div>';
+    return;
+  }
+
+  el.innerHTML = groups.map(g => `
+    <div class="group-row">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <span class="group-name-badge">${g.group_name}</span>
+        <span style="font-size:12px;color:var(--text-sub)">${g.count} creator${g.count !== 1 ? 's' : ''}</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${accounts.filter(a => a.group_name === g.group_name).map(a => `
+          <div class="group-member-chip" data-account-id="${a.id}" data-username="${a.username}">
+            @${a.username}
+            <select class="group-member-select" data-id="${a.id}" title="Move to group">
+              ${groups.map(gg => `<option value="${gg.group_name}" ${gg.group_name === g.group_name ? 'selected' : ''}>${gg.group_name}</option>`).join('')}
+            </select>
+          </div>
+        `).join('')}
+      </div>
+      ${g.group_name !== 'Default' ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:11px" data-delete-group="${g.group_name}">Delete Group</button>` : ''}
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.group-member-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const id = sel.dataset.id;
+      const newGroup = sel.value;
+      try {
+        await api(`/api/accounts/${id}`, { method: 'PATCH', body: { group_name: newGroup } });
+        toast('Group updated', 'success');
+        loadGroupPanel();
+        loadAccounts();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-delete-group]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.deleteGroup;
+      if (!confirm(`Delete group "${name}"? Its creators will be moved to Default.`)) return;
+      await api(`/api/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast(`Group "${name}" deleted`, 'success');
+      loadGroupPanel();
+      loadAccounts();
+    });
+  });
+}
+
+let activeRosterGroup = '';
 
 async function loadAccounts() {
   try {
     const accounts = await api('/api/accounts');
     const grid = $('#targets-grid');
-    if (!accounts.length) {
+
+    // Populate group filter tabs
+    const groups = [...new Set(accounts.map(a => a.group_name).filter(Boolean))].sort();
+    const tabsEl = $('#roster-filter-tabs');
+    if (tabsEl) {
+      tabsEl.innerHTML = `
+        <button class="filter-tab ${activeRosterGroup===''?'active':''}" data-rg="">All</button>
+        ${groups.map(g => `<button class="filter-tab ${activeRosterGroup===g?'active':''}" data-rg="${g}">${g}</button>`).join('')}
+      `;
+      tabsEl.querySelectorAll('[data-rg]').forEach(btn => {
+        btn.addEventListener('click', () => { activeRosterGroup = btn.dataset.rg; loadAccounts(); });
+      });
+    }
+
+    // Populate group suggestions datalist
+    const dl = $('#group-suggestions');
+    if (dl) dl.innerHTML = groups.map(g => `<option value="${g}">`).join('');
+
+    const filtered = activeRosterGroup ? accounts.filter(a => a.group_name === activeRosterGroup) : accounts;
+
+    if (!filtered.length) {
       grid.innerHTML = `
         <div class="empty-state" style="grid-column:1/-1">
           <div class="empty-icon">👥</div>
-          <h3>Creator roster is empty</h3>
-          <p>Add an Instagram handle above to start tracking</p>
+          <h3>${accounts.length ? 'No creators in this group' : 'Creator roster is empty'}</h3>
+          <p>${accounts.length ? 'Switch groups or add creators to this group.' : 'Add an Instagram handle above to start tracking'}</p>
         </div>
       `;
       return;
     }
-    grid.innerHTML = accounts.map(targetPodHTML).join('');
-    grid.querySelectorAll('.pod-scan').forEach(btn => {
-      btn.addEventListener('click', () => scanAccount(btn.dataset.id, btn.dataset.name, btn));
-    });
-    grid.querySelectorAll('.pod-remove').forEach(btn => {
-      btn.addEventListener('click', () => removeAccount(btn.dataset.id, btn.dataset.name));
-    });
+
+    grid.innerHTML = filtered.map(a => targetPodHTML(a)).join('');
+
+    if (selectMode) {
+      grid.querySelectorAll('.target-pod').forEach(pod => {
+        const id = parseInt(pod.dataset.id);
+        pod.classList.add('selectable');
+        if (selectedIds.has(id)) pod.classList.add('selected');
+        pod.addEventListener('click', () => {
+          if (selectedIds.has(id)) selectedIds.delete(id);
+          else selectedIds.add(id);
+          pod.classList.toggle('selected', selectedIds.has(id));
+          const countEl = $('#select-count');
+          if (countEl) countEl.textContent = `${selectedIds.size} selected`;
+        });
+      });
+    } else {
+      grid.querySelectorAll('.pod-scan').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); scanAccount(btn.dataset.id, btn.dataset.name, btn); });
+      });
+      grid.querySelectorAll('.pod-remove').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); removeAccount(btn.dataset.id, btn.dataset.name); });
+      });
+    }
+
     updateStats();
   } catch (err) {
     toast(err.message, 'error');
@@ -814,6 +1013,7 @@ const AGENT_DEF = {
   assistant:  { label: 'The Assistant',  role: 'Research & Intelligence',     icon: 'A', color: '#FF375F', bg: 'rgba(255,55,95,0.12)' },
   researcher: { label: 'The Researcher', role: 'Instagram Trend Analysis',    icon: 'R', color: '#FF9F0A', bg: 'rgba(255,159,10,0.12)' },
   organizer:  { label: 'The Organizer',  role: 'Brief Compiler & Reel Ideas', icon: 'O', color: '#BF5AF2', bg: 'rgba(191,90,242,0.12)' },
+  ideator:    { label: 'The Ideator',    role: 'Reel & TikTok Idea Generator',icon: 'I', color: '#FF6B6B', bg: 'rgba(255,107,107,0.12)' },
 };
 
 function escapeHtml(str) {
@@ -1003,6 +1203,28 @@ async function renderAgents() {
           <input class="agent-input" id="organizer-context" type="text" placeholder="e.g. launching a new product, targeting Gen Z...">
           <button class="btn btn-accent" id="organizer-run-btn" style="width:100%;margin-top:10px;background:var(--purple);border-color:var(--purple)">Compile Brief</button>
           <div class="agent-output-panel" id="organizer-output"></div>
+        </div>
+      </div>
+
+      <!-- IDEATOR -->
+      <div class="agent-card" id="agent-ideator">
+        <div class="agent-header">
+          <div class="agent-icon" style="--icon-color:${AGENT_DEF.ideator.color};--icon-bg:${AGENT_DEF.ideator.bg}">I</div>
+          <div class="agent-meta">
+            <div class="agent-name">${AGENT_DEF.ideator.label}</div>
+            <div class="agent-role">${AGENT_DEF.ideator.role}</div>
+          </div>
+          <div class="agent-status idle" id="ideator-status" title="Status"></div>
+        </div>
+        <div class="agent-body">
+          <p>Analyzes your tracked creators by group and generates 15 ready-to-film reel and TikTok ideas tailored to their specific niche, voice, and what's already working in their content.</p>
+          <label>Creator Group</label>
+          <select class="agent-select" id="ideator-group">
+            <option value="">— All creators —</option>
+            ${[...new Set(accounts.map(a => a.group_name).filter(Boolean))].sort().map(g => `<option value="${g}">${g}</option>`).join('')}
+          </select>
+          <button class="btn btn-accent" id="ideator-run-btn" style="width:100%;margin-top:10px;background:#FF6B6B;border-color:#FF6B6B">Generate Ideas</button>
+          <div class="agent-output-panel" id="ideator-output"></div>
         </div>
       </div>
 
@@ -1214,6 +1436,28 @@ function wireAgentButtons() {
     } finally {
       btn.disabled = false;
       btn.textContent = 'Dispatch Captain';
+    }
+  });
+
+  // IDEATOR
+  $('#ideator-run-btn').addEventListener('click', async () => {
+    const group = $('#ideator-group').value || null;
+    const btn = $('#ideator-run-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating ideas...';
+    setAgentStatus('ideator', 'running');
+    try {
+      const result = await api('/api/agents/ideator', { method: 'POST', body: { group } });
+      setAgentStatus('ideator', 'done');
+      showAgentOutput('ideator-output', result.reviewed);
+      toast(`${result.accountCount} creator${result.accountCount !== 1 ? 's' : ''} analyzed — ideas ready`, 'success');
+      loadAgentHistory();
+    } catch (err) {
+      setAgentStatus('ideator', 'idle');
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Generate Ideas';
     }
   });
 

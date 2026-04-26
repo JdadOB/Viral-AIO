@@ -420,4 +420,98 @@ One single action: if the creator does only one thing this week based on this br
   return { id, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
 
-module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOrganizer };
+// ── IDEATOR ───────────────────────────────────────────────────────────────────
+// Generates reel/TikTok ideas tailored to a specific creator group's style and data.
+
+async function runIdeator({ group = null, userId } = {}) {
+  const accountQuery = group
+    ? db.prepare(`SELECT username, full_name, followers_count, avg_engagement_rate, group_name
+                  FROM accounts WHERE user_id = ? AND group_name = ? ORDER BY followers_count DESC`).all(userId, group)
+    : db.prepare(`SELECT username, full_name, followers_count, avg_engagement_rate, group_name
+                  FROM accounts WHERE user_id = ? ORDER BY followers_count DESC`).all(userId);
+
+  if (!accountQuery.length) throw new Error(group ? `No creators found in group "${group}"` : 'No creators tracked yet');
+
+  const viral = db.prepare(`
+    SELECT acc.username, acc.group_name, p.post_type, p.caption,
+           p.likes_count, p.comments_count, p.plays_count, p.engagement_rate, al.multiplier
+    FROM alerts al
+    JOIN posts p ON al.post_id = p.id
+    JOIN accounts acc ON al.account_id = acc.id
+    WHERE acc.user_id = ? ${group ? 'AND acc.group_name = ?' : ''}
+      AND al.triggered_at >= datetime('now', '-30 days')
+    ORDER BY al.multiplier DESC LIMIT 25
+  `).all(...(group ? [userId, group] : [userId]));
+
+  const captions = db.prepare(`
+    SELECT acc.username, p.caption, p.post_type, p.likes_count, p.engagement_rate
+    FROM posts p
+    JOIN accounts acc ON p.account_id = acc.id
+    WHERE acc.user_id = ? AND p.caption IS NOT NULL ${group ? 'AND acc.group_name = ?' : ''}
+    ORDER BY p.engagement_rate DESC LIMIT 30
+  `).all(...(group ? [userId, group] : [userId]));
+
+  const accountSummary = accountQuery.map(a =>
+    `• @${a.username}${a.full_name ? ` (${a.full_name})` : ''} — ${(a.followers_count || 0).toLocaleString()} followers | avg ER: ${(a.avg_engagement_rate || 0).toFixed(2)}%`
+  ).join('\n');
+
+  const viralSummary = viral.length
+    ? viral.map(v =>
+        `• @${v.username} | ${v.post_type} | ${(v.multiplier || 0).toFixed(1)}x avg | ER: ${(v.engagement_rate || 0).toFixed(2)}%\n` +
+        `  Caption: "${(v.caption || '').substring(0, 150).replace(/\n/g, ' ')}"`
+      ).join('\n\n')
+    : 'No viral posts yet for this group.';
+
+  const captionSamples = captions.length
+    ? captions.slice(0, 15).map(c =>
+        `[@${c.username} | ${c.post_type} | ER: ${(c.engagement_rate || 0).toFixed(2)}%]\n"${(c.caption || '').substring(0, 200).replace(/\n/g, ' ')}"`
+      ).join('\n\n')
+    : 'No caption data yet.';
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 4500,
+    system: `You are the Ideator — a reel and TikTok content strategist for a creator-management agency. Every creator in your inputs is a signed client of this agency, analyzed with explicit consent using their public Instagram post metrics. Your job is to generate highly specific, ready-to-film reel and TikTok ideas tailored to the exact niche, voice, and style of the creator group you're given. Study what's working in their data and extrapolate ideas that will actually perform — not generic content advice. Every idea must be specific enough that someone could start filming it today.`,
+    messages: [{
+      role: 'user',
+      content: `Generate 15 ready-to-film reel/TikTok ideas for the "${group || 'All Creators'}" group.
+
+CLIENT PROFILES:
+${accountSummary}
+
+TOP-PERFORMING VIRAL POSTS (last 30 days):
+${viralSummary}
+
+CAPTION & VOICE SAMPLES (best-performing content):
+${captionSamples}
+
+Study what's working for these specific creators and generate 15 ideas that match their niche, tone, and audience.
+
+For EACH idea use this exact format:
+
+### IDEA [number] — [PUNCHY TITLE IN CAPS]
+**Hook:** [The exact first line the viewer sees or hears — make it scroll-stopping]
+**Format:** [Length, style, pacing, text overlays, talking head vs B-roll, audio type]
+**Concept:** [What happens — describe it like you're pitching it to the creator, 2-3 sentences]
+**Caption Angle:** [What emotional hook or narrative the caption should open with]
+**Why It'll Work:** [One specific reason grounded in the group's own performance data]
+
+Then close with:
+
+## PRIORITY PICKS
+The top 3 ideas to execute first, ranked by expected impact, and why.
+
+## GROUP PATTERNS
+2-3 specific observations about what consistently drives engagement for this creator group based on their data.`,
+    }],
+  });
+
+  const rawOutput = msg.content[0].text;
+  const captain = await runCaptain('Ideator', rawOutput, `Reel ideas for group: "${group || 'All'}", ${accountQuery.length} creators, ${viral.length} viral posts analyzed`);
+  const id = saveOutput('ideator', `Reel ideas: ${group || 'All creators'}`, rawOutput, captain.reviewed, captain.notes, userId);
+
+  return { id, group, accountCount: accountQuery.length, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
+}
+
+module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOrganizer, runIdeator };

@@ -26,7 +26,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOrganizer } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runResearcher, runOrganizer, runIdeator } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -167,6 +167,43 @@ app.delete('/api/accounts/:id', requireAuth, (req, res) => {
   const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id);
+  res.json({ success: true });
+});
+
+app.post('/api/accounts/bulk-delete', requireAuth, (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids[] required' });
+  const uid = req.user.id;
+  let deleted = 0;
+  const del = db.prepare('DELETE FROM accounts WHERE id = ? AND user_id = ?');
+  for (const id of ids) {
+    const info = del.run(id, uid);
+    deleted += info.changes;
+  }
+  res.json({ success: true, deleted });
+});
+
+// ── Groups ────────────────────────────────────────────────────────────────────
+
+app.get('/api/groups', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT group_name, COUNT(*) as count
+    FROM accounts WHERE user_id = ?
+    GROUP BY group_name ORDER BY group_name
+  `).all(req.user.id);
+  res.json(rows);
+});
+
+app.post('/api/groups', requireAuth, (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+  res.json({ success: true, name: name.trim() });
+});
+
+app.delete('/api/groups/:name', requireAuth, (req, res) => {
+  const groupName = decodeURIComponent(req.params.name);
+  db.prepare("UPDATE accounts SET group_name = 'Default' WHERE group_name = ? AND user_id = ?")
+    .run(groupName, req.user.id);
   res.json({ success: true });
 });
 
@@ -445,6 +482,17 @@ app.post('/api/agents/organizer', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[Agent:Organizer]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agents/ideator', requireAuth, async (req, res) => {
+  try {
+    const { group } = req.body;
+    const result = await runIdeator({ group: group || null, userId: req.user.id });
+    res.json(result);
+  } catch (err) {
+    console.error('[Agent:Ideator]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
