@@ -106,6 +106,7 @@ let currentPage = 'dashboard';
 
 function navigate(page) {
   if (!pages.includes(page)) page = 'dashboard';
+  if (page === 'admin' && !(currentUser && currentUser.is_admin)) page = 'dashboard';
   currentPage = page;
   pages.forEach(p => {
     const el = $(`#page-${p}`);
