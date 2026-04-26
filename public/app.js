@@ -2236,31 +2236,38 @@ async function loadChatRooms() {
       fetch('/api/chat/peers').then(r => r.json()),
     ]);
 
-    // Merge: show all peers, highlight ones with existing rooms
     const roomsByPeer = {};
     for (const r of rooms) roomsByPeer[r.peer_id] = r;
 
+    // Rooms whose peer isn't in manager_clients (e.g. admin-initiated conversations)
+    const peerIds = new Set(peers.map(p => p.id));
+    const extraRooms = Array.isArray(rooms) ? rooms.filter(r => !peerIds.has(r.peer_id)) : [];
+
     const listEl = $('#chat-room-list');
-    if (!peers.length) {
+    if (!peers.length && !extraRooms.length) {
       listEl.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim)">No contacts yet.</div>';
       return;
     }
 
-    listEl.innerHTML = peers.map(p => {
-      const room = roomsByPeer[p.id];
+    function roomItem(peerId, name, room) {
       const unread = room?.unread_count || 0;
       const preview = room?.last_message ? room.last_message.substring(0, 36) + (room.last_message.length > 36 ? '…' : '') : 'Start a conversation';
       const active = chatState.roomId && room?.id === chatState.roomId ? ' active' : '';
-      return `<div class="chat-room-item${active}" data-peer="${p.id}" data-name="${p.name}" onclick="openRoom(${p.id}, '${p.name.replace(/'/g, "\\'")}')">
-        <div class="chat-room-avatar">${initials(p.name)}</div>
+      return `<div class="chat-room-item${active}" data-peer="${peerId}" data-name="${name}" onclick="openRoom(${peerId}, '${name.replace(/'/g, "\\'")}')">
+        <div class="chat-room-avatar">${initials(name)}</div>
         <div class="chat-room-info">
-          <div class="chat-room-name">${p.name} ${unread ? `<span class="chat-unread-dot">${unread}</span>` : ''}</div>
+          <div class="chat-room-name">${name} ${unread ? `<span class="chat-unread-dot">${unread}</span>` : ''}</div>
           <div class="chat-room-preview">${preview}</div>
         </div>
       </div>`;
-    }).join('');
+    }
 
-    // If a room is already open, keep it open
+    const peerItems  = peers.map(p => roomItem(p.id, p.name, roomsByPeer[p.id]));
+    const extraItems = extraRooms.map(r => roomItem(r.peer_id, r.peer_name || 'Unknown', r));
+
+    listEl.innerHTML = [...peerItems, ...extraItems].join('');
+
+    // Keep active highlight on the currently open room
     if (chatState.roomId) {
       const cur = rooms.find(r => r.id === chatState.roomId);
       if (cur) document.querySelector(`.chat-room-item[data-peer="${cur.peer_id}"]`)?.classList.add('active');

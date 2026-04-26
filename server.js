@@ -843,6 +843,17 @@ app.post('/api/chat/rooms', requireAuth, (req, res) => {
   const peerId = parseInt(req.body.peerId);
   if (!peerId) return res.status(400).json({ error: 'peerId required' });
 
+  // If a room already exists between these two users, always return it —
+  // the auth check only gates creation of new rooms, not access to existing ones.
+  const existing = db.prepare(`
+    SELECT cr.id FROM chat_rooms cr
+    JOIN chat_room_members m1 ON m1.room_id = cr.id AND m1.user_id = ?
+    JOIN chat_room_members m2 ON m2.room_id = cr.id AND m2.user_id = ?
+    WHERE (SELECT COUNT(*) FROM chat_room_members WHERE room_id = cr.id) = 2
+  `).get(uid, peerId);
+  if (existing) return res.json({ roomId: existing.id });
+
+  // No existing room — enforce role-based authorization before creating one.
   const role = userRole(req.user);
   if (role !== 'admin') {
     if (role === 'manager') {
@@ -853,14 +864,6 @@ app.post('/api/chat/rooms', requireAuth, (req, res) => {
       if (!link) return res.status(403).json({ error: 'Not authorized' });
     }
   }
-
-  const existing = db.prepare(`
-    SELECT cr.id FROM chat_rooms cr
-    JOIN chat_room_members m1 ON m1.room_id = cr.id AND m1.user_id = ?
-    JOIN chat_room_members m2 ON m2.room_id = cr.id AND m2.user_id = ?
-    WHERE (SELECT COUNT(*) FROM chat_room_members WHERE room_id = cr.id) = 2
-  `).get(uid, peerId);
-  if (existing) return res.json({ roomId: existing.id });
 
   const { lastInsertRowid: roomId } = db.prepare('INSERT INTO chat_rooms DEFAULT VALUES').run();
   db.prepare('INSERT INTO chat_room_members (room_id, user_id) VALUES (?, ?)').run(roomId, uid);
