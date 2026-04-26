@@ -41,6 +41,10 @@ function getProfileCaptions(username, limit = 20) {
   `).all(username, limit);
 }
 
+function getCreatorProfile(accountId) {
+  return db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(accountId);
+}
+
 function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, captainNotes = null, userId = null) {
   const { lastInsertRowid } = db.prepare(`
     INSERT INTO agent_outputs (agent, input_summary, raw_output, reviewed_output, captain_notes, user_id)
@@ -61,7 +65,7 @@ async function runCaptain(agentName, rawOutput, context = '') {
     ? `You are the Captain — the final editor before content reaches a creator client. Your job is to take the Ideator's reel/TikTok ideas and make them immediately understandable and exciting for the creator who will be reading and filming them.
 
 Rules:
-1. Keep EVERY idea intact — do not remove, combine, or reorder any of the 15 ideas. All content stays.
+1. Keep EVERY idea intact — do not remove, combine, or reorder any of the 5 ideas. All content stays.
 2. Strip all analytics-speak, agency jargon, and internal terminology. Replace with plain, direct language a creator can act on.
 3. Where a concept is abstract, add a quick concrete example in plain language — enough that the creator pictures the shot in their head.
 4. Tone = smart creative director briefing a client: clear, encouraging, specific, no fluff.
@@ -72,7 +76,7 @@ Rules:
 Respond in EXACTLY this format:
 
 ## REVIEWED OUTPUT
-[Full client-ready version — all 15 ideas preserved, language simplified and clear]
+[Full client-ready version — all 5 ideas preserved, language simplified and clear]
 
 ## CAPTAIN'S NOTES
 [Brief: what you translated or clarified, or "Clean — minimal edits needed."]`
@@ -200,6 +204,16 @@ async function runWriter({ username, contentGoal = null, viralCaption = null, us
       ).join('\n\n---\n\n')
     : 'No caption history available yet.';
 
+  const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+  const profileBlock = profile ? `
+CREATOR INTELLIGENCE PROFILE:
+• Voice: ${profile.voice_fingerprint}
+• Content Pillars: ${profile.content_pillars}
+• Audience Triggers: ${profile.audience_triggers}
+• Visual Style: ${profile.visual_style}
+• Strength: ${profile.strength_summary}
+` : '';
+
   const ai = client();
   const msg = await ai.messages.create({
     model: MODEL,
@@ -213,7 +227,7 @@ PROFILE:
 • Username: @${username}${account.full_name ? ` / ${account.full_name}` : ''}
 • Followers: ${(account.followers_count || 0).toLocaleString()}
 • Avg Engagement Rate: ${(account.avg_engagement_rate || 0).toFixed(2)}%
-
+${profileBlock}
 THEIR BEST-PERFORMING CAPTIONS — study the voice, hooks, emoji usage, sentence length, personality:
 ${captionExamples}
 
@@ -285,6 +299,110 @@ async function runAssistant({ question, requestingAgent = 'user', userId }) {
   return { id, question, answer: captain.reviewed };
 }
 
+// ── PROFILE BUILDER ───────────────────────────────────────────────────────────
+// Builds a deep intelligence profile for a single creator based on their post data.
+
+async function runProfileBuilder(accountId, userId) {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(accountId, userId);
+  if (!account) throw new Error('Creator not found');
+
+  const posts = db.prepare(`
+    SELECT caption, post_type, likes_count, comments_count, plays_count, engagement_rate, posted_at
+    FROM posts WHERE account_id = ? ORDER BY engagement_rate DESC LIMIT 40
+  `).all(accountId);
+
+  const viralPosts = db.prepare(`
+    SELECT p.caption, p.post_type, p.likes_count, p.comments_count, p.plays_count, p.engagement_rate, al.multiplier
+    FROM alerts al JOIN posts p ON al.post_id = p.id
+    WHERE al.account_id = ? ORDER BY al.multiplier DESC LIMIT 15
+  `).all(accountId);
+
+  if (!posts.length) throw new Error(`No post data yet for @${account.username} — run a scan first`);
+
+  const postBlock = posts.map(p =>
+    `[${p.post_type} | ER: ${(p.engagement_rate||0).toFixed(2)}% | ♥${p.likes_count} 💬${p.comments_count} ▶${p.plays_count||0}]\n"${(p.caption||'').substring(0,300).replace(/\n/g,' ')}"`
+  ).join('\n\n');
+
+  const viralBlock = viralPosts.length
+    ? viralPosts.map(v =>
+        `[${v.multiplier.toFixed(1)}x VIRAL | ${v.post_type} | ER: ${(v.engagement_rate||0).toFixed(2)}%]\n"${(v.caption||'').substring(0,300).replace(/\n/g,' ')}"`
+      ).join('\n\n')
+    : 'No viral posts detected yet.';
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    system: `You are the Brain — a creator intelligence specialist. You analyze a creator's full post history and build a deep profile that captures who they are as a content creator: their voice, their themes, what makes their audience tick, and how to find more creators like them. You must respond with ONLY valid JSON — no markdown, no prose, no code fences. Match this schema exactly:
+
+{
+  "contentPillars": ["string", "string", "string"],
+  "voiceFingerprint": "string",
+  "audienceTriggers": "string",
+  "nichePositioning": "string",
+  "visualStyle": "string",
+  "discoveryBrief": "string",
+  "strengthSummary": "string"
+}
+
+contentPillars: 3-5 core topics/themes this creator consistently covers.
+voiceFingerprint: 2-3 sentences describing their unique tone, personality, communication style, and how they talk to their audience.
+audienceTriggers: What specifically drives engagement for this creator — emotional hooks, topics, formats, or moments that consistently pull their audience in.
+nichePositioning: Where they sit in their niche — are they aspirational, relatable, educational, entertainment-driven, authority-based? How do they differentiate?
+visualStyle: Their content format preferences — reel style, pacing, text overlay use, aesthetic, talking head vs b-roll, editing energy.
+discoveryBrief: A specific 3-4 sentence brief someone could use to find similar creators on Instagram. Be concrete — mention follower range, niche keywords, content style markers, aesthetic cues.
+strengthSummary: One sentence — their single biggest content strength that makes them stand out.`,
+    messages: [{
+      role: 'user',
+      content: `Build a creator intelligence profile for @${account.username}${account.full_name ? ` (${account.full_name})` : ''}.
+
+ACCOUNT STATS:
+• Followers: ${(account.followers_count||0).toLocaleString()}
+• Avg Engagement Rate: ${(account.avg_engagement_rate||0).toFixed(2)}%
+• Group: ${account.group_name || 'Ungrouped'}
+
+TOP-PERFORMING POSTS (by engagement rate):
+${postBlock}
+
+VIRAL POSTS (above threshold):
+${viralBlock}`,
+    }],
+  });
+
+  const raw = msg.content[0].text;
+  let profile;
+  try {
+    profile = JSON.parse(raw);
+  } catch {
+    throw new Error('Profile builder returned malformed JSON');
+  }
+
+  db.prepare(`
+    INSERT INTO creator_profiles (account_id, user_id, content_pillars, voice_fingerprint, audience_triggers, niche_positioning, visual_style, discovery_brief, strength_summary, built_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(account_id) DO UPDATE SET
+      content_pillars = excluded.content_pillars,
+      voice_fingerprint = excluded.voice_fingerprint,
+      audience_triggers = excluded.audience_triggers,
+      niche_positioning = excluded.niche_positioning,
+      visual_style = excluded.visual_style,
+      discovery_brief = excluded.discovery_brief,
+      strength_summary = excluded.strength_summary,
+      built_at = datetime('now')
+  `).run(
+    accountId, userId,
+    JSON.stringify(profile.contentPillars),
+    profile.voiceFingerprint,
+    profile.audienceTriggers,
+    profile.nichePositioning,
+    profile.visualStyle,
+    profile.discoveryBrief,
+    profile.strengthSummary
+  );
+
+  return { accountId, username: account.username, profile };
+}
+
 // ── IDEATOR ───────────────────────────────────────────────────────────────────
 // Generates reel/TikTok ideas tailored to a specific creator group's style and data.
 
@@ -333,17 +451,30 @@ async function runIdeator({ group = null, userId } = {}) {
       ).join('\n\n')
     : 'No caption data yet.';
 
+  const profileRows = db.prepare(`
+    SELECT cp.*, a.username FROM creator_profiles cp
+    JOIN accounts a ON cp.account_id = a.id
+    WHERE cp.user_id = ? ${group ? 'AND a.group_name = ?' : ''}
+  `).all(...(group ? [userId, group] : [userId]));
+
+  const profileBlock = profileRows.length
+    ? '\nCREATOR INTELLIGENCE PROFILES:\n' + profileRows.map(p =>
+        `@${p.username}:\n  Voice: ${p.voice_fingerprint}\n  Pillars: ${p.content_pillars}\n  Triggers: ${p.audience_triggers}\n  Strength: ${p.strength_summary}`
+      ).join('\n\n')
+    : '';
+
   const ai = client();
   const msg = await ai.messages.create({
     model: MODEL,
-    max_tokens: 4500,
+    max_tokens: 3500,
     system: `You are the Ideator — a reel and TikTok content strategist for a creator-management agency. Every creator in your inputs is a signed client of this agency, analyzed with explicit consent using their public Instagram post metrics. Your job is to generate highly specific, ready-to-film reel and TikTok ideas tailored to the exact niche, voice, and style of the creator group you're given. Study what's working in their data and extrapolate ideas that will actually perform — not generic content advice. Every idea must be specific enough that someone could start filming it today.`,
     messages: [{
       role: 'user',
-      content: `Generate 15 ready-to-film reel/TikTok ideas for the "${group || 'All Creators'}" group.
+      content: `Generate 5 ready-to-film reel/TikTok ideas for the "${group || 'All Creators'}" group.
 
 CLIENT PROFILES:
 ${accountSummary}
+${profileBlock}
 
 TOP-PERFORMING VIRAL POSTS (last 30 days):
 ${viralSummary}
@@ -351,7 +482,7 @@ ${viralSummary}
 CAPTION & VOICE SAMPLES (best-performing content):
 ${captionSamples}
 
-Study what's working for these specific creators and generate 15 ideas that match their niche, tone, and audience.
+Study what's working for these specific creators and generate exactly 5 ideas that match their niche, tone, and audience.
 
 For EACH idea use this exact format:
 
@@ -379,4 +510,4 @@ The top 3 ideas to execute first, ranked by expected impact, and why.
   return { id, group, accountCount: accountQuery.length, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
 
-module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator };
+module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder };

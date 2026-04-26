@@ -142,6 +142,24 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS creator_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    content_pillars TEXT,
+    voice_fingerprint TEXT,
+    audience_triggers TEXT,
+    niche_positioning TEXT,
+    visual_style TEXT,
+    discovery_brief TEXT,
+    strength_summary TEXT,
+    built_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     sid TEXT PRIMARY KEY,
     sess TEXT NOT NULL,

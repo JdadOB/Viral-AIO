@@ -101,7 +101,7 @@ document.getElementById('theme-toggle')?.addEventListener('click', () => {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-const pages = ['dashboard', 'competitors', 'agents', 'settings', 'admin'];
+const pages = ['dashboard', 'competitors', 'agents', 'brain', 'settings', 'admin'];
 let currentPage = 'dashboard';
 
 function navigate(page) {
@@ -123,6 +123,7 @@ function renderPage(page) {
   else if (page === 'competitors') renderCompetitors();
   else if (page === 'agents') renderAgents();
   else if (page === 'settings') renderSettings();
+  else if (page === 'brain') renderBrain();
   else if (page === 'admin') renderAdmin();
 }
 
@@ -1390,6 +1391,124 @@ function wireAgentButtons() {
   $('#output-modal').addEventListener('click', e => {
     if (e.target === $('#output-modal')) $('#output-modal').classList.add('hidden');
   });
+}
+
+// ── Brain ─────────────────────────────────────────────────────────────────────
+
+async function renderBrain() {
+  const el = $('#page-brain');
+  el.innerHTML = `
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 class="page-title">The Brain</h2>
+        <p style="font-size:13px;color:var(--text-sub);margin-top:4px">Creator intelligence profiles — the deeper understanding powering your Writer and Ideator</p>
+      </div>
+      <button class="btn btn-accent" id="brain-build-all-btn" style="background:var(--purple);border-color:var(--purple)">Build All Profiles</button>
+    </div>
+    <div id="brain-status" style="display:none;padding:10px 14px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:13px;color:var(--accent);margin-bottom:16px"></div>
+    <div id="brain-grid" class="brain-grid">
+      <div style="color:var(--text-dim);font-size:13px;padding:40px 0;text-align:center">Loading profiles...</div>
+    </div>
+  `;
+
+  $('#brain-build-all-btn').addEventListener('click', async () => {
+    const btn = $('#brain-build-all-btn');
+    const status = $('#brain-status');
+    btn.disabled = true;
+    btn.textContent = 'Building...';
+    status.style.display = 'block';
+    status.textContent = 'Running profile builder across all creators — this may take a minute...';
+    try {
+      const res = await api('/api/brain/build', { method: 'POST', body: {} });
+      status.textContent = `Done — ${res.built} profile${res.built !== 1 ? 's' : ''} built successfully.`;
+      toast('Profiles built', 'success');
+      loadBrainProfiles();
+    } catch (err) {
+      status.style.color = 'var(--red)';
+      status.textContent = 'Error: ' + err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Build All Profiles';
+  });
+
+  loadBrainProfiles();
+}
+
+async function loadBrainProfiles() {
+  const grid = $('#brain-grid');
+  if (!grid) return;
+  try {
+    const profiles = await api('/api/brain/profiles');
+
+    if (!profiles.length) {
+      grid.innerHTML = `
+        <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--text-dim)">
+          <div style="font-size:32px;margin-bottom:12px">🧠</div>
+          <div style="font-size:15px;font-weight:600;color:var(--text-sub);margin-bottom:6px">No profiles built yet</div>
+          <div style="font-size:13px">Click "Build All Profiles" to analyze your creators and generate intelligence profiles.</div>
+        </div>`;
+      return;
+    }
+
+    grid.innerHTML = profiles.map(p => {
+      const pillars = (() => { try { return JSON.parse(p.content_pillars); } catch { return []; } })();
+      return `
+      <div class="brain-card">
+        <div class="brain-card-header">
+          <div class="target-avatar">${p.profile_pic_url ? `<img src="${proxyImg(p.profile_pic_url)}" onerror="this.style.display='none'">` : ''}<span>${initials(p.full_name || p.username)}</span></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px;color:var(--text-main)">@${p.username}</div>
+            <div style="font-size:12px;color:var(--text-dim)">${(p.followers_count||0).toLocaleString()} followers · ${p.group_name||'Ungrouped'}</div>
+          </div>
+          <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--bg-3);color:var(--text-sub);border:1px solid var(--border-strong)" onclick="rebuildProfile(${p.account_id})">Rebuild</button>
+        </div>
+
+        ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
+
+        ${pillars.length ? `
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+          ${pillars.map(tag => `<span class="brain-pillar">${tag}</span>`).join('')}
+        </div>` : ''}
+
+        <div class="brain-section">
+          <div class="brain-label">Voice</div>
+          <div class="brain-value">${p.voice_fingerprint || '—'}</div>
+        </div>
+        <div class="brain-section">
+          <div class="brain-label">Audience Triggers</div>
+          <div class="brain-value">${p.audience_triggers || '—'}</div>
+        </div>
+        <div class="brain-section">
+          <div class="brain-label">Niche Position</div>
+          <div class="brain-value">${p.niche_positioning || '—'}</div>
+        </div>
+        <div class="brain-section">
+          <div class="brain-label">Visual Style</div>
+          <div class="brain-value">${p.visual_style || '—'}</div>
+        </div>
+
+        <details class="brain-discovery">
+          <summary>Find Similar Creators</summary>
+          <div class="brain-value" style="margin-top:8px">${p.discovery_brief || '—'}</div>
+        </details>
+
+        <div style="font-size:10px;color:var(--text-dim);margin-top:10px;text-align:right">Built ${timeAgo(p.built_at)}</div>
+      </div>`;
+    }).join('');
+  } catch {
+    grid.innerHTML = '<div style="color:var(--red);font-size:13px;padding:20px">Failed to load profiles.</div>';
+  }
+}
+
+async function rebuildProfile(accountId) {
+  toast('Rebuilding profile...', '');
+  try {
+    await api('/api/brain/build', { method: 'POST', body: { accountId } });
+    toast('Profile rebuilt', 'success');
+    loadBrainProfiles();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

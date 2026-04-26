@@ -61,7 +61,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -542,6 +542,44 @@ app.post('/api/agents/ideator', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[Agent:Ideator]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Brain routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/brain/profiles', requireAuth, (req, res) => {
+  const profiles = db.prepare(`
+    SELECT cp.*, a.username, a.full_name, a.followers_count, a.avg_engagement_rate, a.profile_pic_url, a.group_name
+    FROM creator_profiles cp
+    JOIN accounts a ON cp.account_id = a.id
+    WHERE cp.user_id = ?
+    ORDER BY a.username ASC
+  `).all(req.user.id);
+  res.json(profiles);
+});
+
+app.post('/api/brain/build', requireAuth, async (req, res) => {
+  const { accountId } = req.body;
+  const uid = req.user.id;
+  try {
+    if (accountId) {
+      const result = await runProfileBuilder(parseInt(accountId), uid);
+      return res.json({ built: 1, profiles: [result] });
+    }
+    const accounts = db.prepare('SELECT id, username FROM accounts WHERE user_id = ?').all(uid);
+    const results = [];
+    for (const acc of accounts) {
+      try {
+        const r = await runProfileBuilder(acc.id, uid);
+        results.push(r);
+      } catch (e) {
+        console.warn(`[Brain] Skipped @${acc.username}: ${e.message}`);
+      }
+    }
+    res.json({ built: results.length, profiles: results });
+  } catch (err) {
+    console.error('[Brain]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
