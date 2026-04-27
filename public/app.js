@@ -1,4 +1,4 @@
-const APP_VERSION = '0.51';
+const APP_VERSION = '0.52';
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -1134,6 +1134,7 @@ $('#poll-btn').addEventListener('click', async () => {
 // Bulk caption upload state — reset each time the agents page is rendered
 let _bulkFiles = [];
 let _bulkResults = null;
+let _bulkThumbnails = {}; // filename → data URL
 
 const AGENT_DEF = {
   captain:    { label: 'The Captain',    role: 'Quality Control & Humanizer', icon: 'C', color: '#FF9F0A', bg: 'rgba(255,159,10,0.12)' },
@@ -1197,6 +1198,7 @@ function showOutputModal(title, output, captainNotes) {
 async function renderAgents() {
   _bulkFiles = [];
   _bulkResults = null;
+  _bulkThumbnails = {};
   const el = $('#page-agents');
   const accounts = await api('/api/accounts');
 
@@ -1610,10 +1612,17 @@ function wireAgentButtons() {
     if (!_bulkFiles.length) return toast('Add at least one .MOV video first', 'error');
     const btn = $('#bulk-generate-btn');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Generating...';
     setAgentStatus('bulk', 'running');
     try {
-      const videos = _bulkFiles.map(f => ({ name: f.name, size: f.size }));
+      btn.innerHTML = `<span class="spinner"></span> Extracting keyframes (${_bulkFiles.length} video${_bulkFiles.length !== 1 ? 's' : ''})...`;
+      const videos = await Promise.all(
+        _bulkFiles.map(async f => ({
+          name: f.name,
+          size: f.size,
+          keyframes: await extractVideoKeyframes(f, 4),
+        }))
+      );
+      btn.innerHTML = '<span class="spinner"></span> Generating captions...';
       const result = await api('/api/agents/bulk-captions', { method: 'POST', body: { username, videos } });
       _bulkResults = result.results;
       setAgentStatus('bulk', 'done');
@@ -1655,6 +1664,48 @@ function wireAgentButtons() {
 
 // ── Bulk caption helpers ──────────────────────────────────────────────────────
 
+// Extracts `count` JPEG keyframes from a video File at evenly-spaced timestamps.
+// Returns an array of base64 strings (no data: prefix). Resolves [] on failure.
+function extractVideoKeyframes(file, count = 4) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const frames = [];
+
+    video.addEventListener('error', () => { URL.revokeObjectURL(url); resolve([]); });
+
+    video.addEventListener('loadedmetadata', async () => {
+      const dur = video.duration;
+      if (!dur || !isFinite(dur) || dur <= 0) { URL.revokeObjectURL(url); resolve([]); return; }
+
+      const timestamps = [0.05, 0.3, 0.6, 0.85].slice(0, count).map(t => t * dur);
+      for (const t of timestamps) {
+        try {
+          await new Promise(res => {
+            video.addEventListener('seeked', res, { once: true });
+            video.currentTime = t;
+          });
+          const W = Math.min(video.videoWidth || 640, 640);
+          const H = video.videoWidth ? Math.round(W * video.videoHeight / video.videoWidth) : 360;
+          canvas.width = W;
+          canvas.height = H;
+          ctx.drawImage(video, 0, 0, W, H);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          frames.push(dataUrl.replace(/^data:image\/jpeg;base64,/, ''));
+        } catch { /* skip failed frame */ }
+      }
+      URL.revokeObjectURL(url);
+      resolve(frames);
+    });
+
+    video.src = url;
+  });
+}
+
 function handleBulkFileSelection(files) {
   const MAX_SIZE = 500 * 1024 * 1024;
   const errEl = $('#bulk-error-msg');
@@ -1688,6 +1739,18 @@ function handleBulkFileSelection(files) {
   }
 
   renderBulkFileList();
+
+  // Extract thumbnails in the background for newly added files
+  for (const f of files) {
+    if (!_bulkThumbnails[f.name]) {
+      extractVideoKeyframes(f, 1).then(frames => {
+        if (frames[0]) {
+          _bulkThumbnails[f.name] = `data:image/jpeg;base64,${frames[0]}`;
+          renderBulkFileList();
+        }
+      });
+    }
+  }
 }
 
 function renderBulkFileList() {
@@ -1701,7 +1764,9 @@ function renderBulkFileList() {
     </div>
     ${_bulkFiles.map((f, i) => `
       <div class="video-file-item">
-        <div class="video-file-icon">▶</div>
+        ${_bulkThumbnails[f.name]
+          ? `<img class="video-file-thumb" src="${_bulkThumbnails[f.name]}" alt="thumbnail">`
+          : `<div class="video-file-icon">▶</div>`}
         <div class="video-file-info">
           <div class="video-file-name">${escapeHtml(f.name)}</div>
           <div class="video-file-size">${formatFileSize(f.size)}</div>
@@ -1731,7 +1796,9 @@ function renderBulkCaptionResults(results) {
   container.innerHTML = results.map((video, vi) => `
     <div class="caption-video-group">
       <div class="caption-video-header">
-        <span class="caption-video-icon">▶</span>
+        ${_bulkThumbnails[video.videoName]
+          ? `<img class="caption-video-thumb" src="${_bulkThumbnails[video.videoName]}" alt="thumbnail">`
+          : `<span class="caption-video-icon">▶</span>`}
         <span class="caption-video-name">${escapeHtml(video.videoName)}</span>
         <span class="caption-count">${(video.captions || []).length} captions</span>
       </div>

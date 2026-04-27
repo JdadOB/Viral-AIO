@@ -1822,6 +1822,14 @@ select option { background: var(--bg-2); }
   width: 20px;
   text-align: center;
 }
+.video-file-thumb {
+  width: 48px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
 .video-file-info { flex: 1; min-width: 0; }
 .video-file-name {
   font-size: 13px;
@@ -1874,6 +1882,14 @@ select option { background: var(--bg-2); }
   border-bottom: 1px solid var(--border);
 }
 .caption-video-icon { font-size: 11px; color: var(--purple); }
+.caption-video-thumb {
+  width: 72px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: 5px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
 .caption-video-name {
   flex: 1;
   font-size: 13px;
