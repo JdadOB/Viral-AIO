@@ -7,6 +7,67 @@ function client() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
+// ── Emoji analysis helpers ────────────────────────────────────────────────────
+
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+
+function extractEmojiStats(posts) {
+  const allCounts   = {};
+  const highErCounts = {};
+  let   total        = 0;
+
+  if (!posts.length) return { topEmojis: [], usageStyle: 'never uses emojis', avgPerPost: '0', totalUsed: 0, uniqueCount: 0, rawCounts: {} };
+
+  const sorted  = posts.slice().sort((a, b) => (b.engagement_rate || 0) - (a.engagement_rate || 0));
+  const medianEr = (sorted[Math.floor(sorted.length / 2)]?.engagement_rate) || 0;
+
+  for (const post of posts) {
+    if (!post.caption) continue;
+    const emojis = [...post.caption.matchAll(new RegExp(EMOJI_RE.source, 'gu'))].map(m => m[0]);
+    total += emojis.length;
+    const isHigh = (post.engagement_rate || 0) >= medianEr;
+    for (const e of emojis) {
+      allCounts[e]   = (allCounts[e]   || 0) + 1;
+      if (isHigh) highErCounts[e] = (highErCounts[e] || 0) + 1;
+    }
+  }
+
+  const entries = Object.entries(allCounts).sort((a, b) => b[1] - a[1]);
+  const avg     = total / Math.max(1, posts.length);
+
+  let usageStyle;
+  if (total === 0)   usageStyle = 'never uses emojis — plain text only';
+  else if (avg < 0.5) usageStyle = 'rarely uses emojis (less than 1 per post)';
+  else if (avg < 2)   usageStyle = 'light emoji user (~1 per post)';
+  else if (avg < 5)   usageStyle = 'moderate emoji user (2–4 per post)';
+  else                usageStyle = 'heavy emoji user (5+ per post)';
+
+  const topEmojis = entries.slice(0, 20).map(([emoji, count]) => ({
+    emoji,
+    count,
+    highErCount: highErCounts[emoji] || 0,
+    pctHighEr:   highErCounts[emoji] ? Math.round((highErCounts[emoji] / count) * 100) : 0,
+  }));
+
+  return { topEmojis, usageStyle, avgPerPost: avg.toFixed(1), totalUsed: total, uniqueCount: entries.length, rawCounts: allCounts };
+}
+
+function formatEmojiBlock(emojiStats) {
+  if (!emojiStats || emojiStats.totalUsed === 0) {
+    return '\nEMOJI RULE: This creator writes in plain text — use NO emojis.';
+  }
+  const top      = emojiStats.topEmojis || [];
+  const highPerf = top.filter(e => e.pctHighEr >= 60).map(e => e.emoji).join(' ') || '—';
+  const regular  = top.filter(e => e.pctHighEr < 60 && e.count >= 2).map(e => e.emoji).join(' ') || '—';
+  const full     = top.slice(0, 12).map(e => e.emoji).join(' ') || '—';
+  return `
+EMOJI FINGERPRINT — replicate exactly, do NOT use emojis outside this set:
+• Usage style: ${emojiStats.usageStyle} (avg ${emojiStats.avgPerPost}/post)
+• High-ER emojis (in best-performing posts): ${highPerf}
+• Regular emojis: ${regular}
+• Full signature set: ${full}`;
+}
+
 // ── Context builders ──────────────────────────────────────────────────────────
 
 function getAccountsContext(userId) {
@@ -205,6 +266,7 @@ async function runWriter({ username, contentGoal = null, viralCaption = null, us
     : 'No caption history available yet.';
 
   const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+  const emojiData = profile?.emoji_fingerprint ? (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })() : null;
   const profileBlock = profile ? `
 CREATOR INTELLIGENCE PROFILE:
 • Voice: ${profile.voice_fingerprint}
@@ -212,7 +274,7 @@ CREATOR INTELLIGENCE PROFILE:
 • Audience Triggers: ${profile.audience_triggers}
 • Visual Style: ${profile.visual_style}
 • Strength: ${profile.strength_summary}
-` : '';
+${formatEmojiBlock(emojiData)}` : '';
 
   const ai = client();
   const msg = await ai.messages.create({
@@ -319,6 +381,22 @@ async function runProfileBuilder(accountId, userId) {
 
   if (!posts.length) throw new Error(`No post data yet for @${account.username} — run a scan first`);
 
+  // Extract emoji stats from ALL captions before the Claude call
+  const emojiStats = extractEmojiStats(posts);
+  const emojiDataBlock = emojiStats.totalUsed > 0
+    ? `\nEMOJI USAGE DATA (extracted from ${posts.length} posts):
+• Style: ${emojiStats.usageStyle}
+• Avg per post: ${emojiStats.avgPerPost}
+• Unique emojis used: ${emojiStats.uniqueCount}
+• Top emojis by frequency: ${emojiStats.topEmojis.slice(0, 10).map(e => `${e.emoji}(${e.count})`).join(' ')}
+• High-ER emojis (in top-performing posts): ${emojiStats.topEmojis.filter(e => e.pctHighEr >= 60).map(e => e.emoji).join(' ') || 'none identified'}`
+    : '\nEMOJI USAGE DATA: No emojis detected — this creator writes in plain text.';
+
+  // Extract top verbatim hooks from best-performing posts
+  const topHooksRaw = posts.slice(0, 10)
+    .map(p => (p.caption || '').split('\n')[0].substring(0, 200).trim())
+    .filter(Boolean);
+
   const postBlock = posts.map(p =>
     `[${p.post_type} | ER: ${(p.engagement_rate||0).toFixed(2)}% | ♥${p.likes_count} 💬${p.comments_count} ▶${p.plays_count||0}]\n"${(p.caption||'').substring(0,300).replace(/\n/g,' ')}"`
   ).join('\n\n');
@@ -329,11 +407,14 @@ async function runProfileBuilder(accountId, userId) {
       ).join('\n\n')
     : 'No viral posts detected yet.';
 
+  // Get current post count for adaptive learning baseline
+  const { count: currentPostCount } = db.prepare('SELECT COUNT(*) as count FROM posts WHERE account_id = ?').get(accountId);
+
   const ai = client();
   const msg = await ai.messages.create({
     model: MODEL,
-    max_tokens: 2000,
-    system: `You are the Brain — a creator intelligence specialist. You analyze a creator's full post history and build a deep profile that captures who they are as a content creator: their voice, their themes, what makes their audience tick, and how to find more creators like them. You must respond with ONLY valid JSON — no markdown, no prose, no code fences. Match this schema exactly:
+    max_tokens: 2500,
+    system: `You are the Brain — a creator intelligence specialist. You analyze a creator's full post history and build a deep profile capturing their voice, themes, emoji personality, and what makes their audience tick. You must respond with ONLY valid JSON — no markdown, no prose, no code fences. Match this schema exactly:
 
 {
   "contentPillars": ["string", "string", "string"],
@@ -342,16 +423,28 @@ async function runProfileBuilder(accountId, userId) {
   "nichePositioning": "string",
   "visualStyle": "string",
   "discoveryBrief": "string",
-  "strengthSummary": "string"
+  "strengthSummary": "string",
+  "emojiFingerprint": {
+    "signature": "string",
+    "mustUse": ["emoji1", "emoji2"],
+    "avoidList": ["emoji3"],
+    "placementStyle": "string",
+    "usageStyle": "string"
+  }
 }
 
 contentPillars: 3-5 core topics/themes this creator consistently covers.
 voiceFingerprint: 2-3 sentences describing their unique tone, personality, communication style, and how they talk to their audience.
-audienceTriggers: What specifically drives engagement for this creator — emotional hooks, topics, formats, or moments that consistently pull their audience in.
-nichePositioning: Where they sit in their niche — are they aspirational, relatable, educational, entertainment-driven, authority-based? How do they differentiate?
-visualStyle: Their content format preferences — reel style, pacing, text overlay use, aesthetic, talking head vs b-roll, editing energy.
-discoveryBrief: A specific 3-4 sentence brief someone could use to find similar creators on Instagram. Be concrete — mention follower range, niche keywords, content style markers, aesthetic cues.
-strengthSummary: One sentence — their single biggest content strength that makes them stand out.`,
+audienceTriggers: What specifically drives engagement — emotional hooks, topics, formats, or moments that consistently pull their audience in.
+nichePositioning: Where they sit in their niche — aspirational, relatable, educational, entertainment-driven, authority-based? How do they differentiate?
+visualStyle: Content format preferences — reel style, pacing, text overlay use, aesthetic, talking head vs b-roll, editing energy.
+discoveryBrief: A specific 3-4 sentence brief to find similar creators. Be concrete — mention follower range, niche keywords, content style markers, aesthetic cues.
+strengthSummary: One sentence — their single biggest content strength.
+emojiFingerprint.signature: One sentence summarizing their emoji personality (e.g. "Opens with 🔥 for hype, uses 💪 before motivational lines, always puts 👇 before CTAs").
+emojiFingerprint.mustUse: Array of emojis that appear in their high-ER posts — these define their voice.
+emojiFingerprint.avoidList: Array of common emojis this creator clearly does NOT use (❤️ 😊 🙏 etc., if absent from their data). Empty array if uncertain.
+emojiFingerprint.placementStyle: Where they place emojis — at the start, after key phrases, before CTA, etc.
+emojiFingerprint.usageStyle: Copy verbatim from the usage data provided.`,
     messages: [{
       role: 'user',
       content: `Build a creator intelligence profile for @${account.username}${account.full_name ? ` (${account.full_name})` : ''}.
@@ -360,6 +453,7 @@ ACCOUNT STATS:
 • Followers: ${(account.followers_count||0).toLocaleString()}
 • Avg Engagement Rate: ${(account.avg_engagement_rate||0).toFixed(2)}%
 • Group: ${account.group_name || 'Ungrouped'}
+${emojiDataBlock}
 
 TOP-PERFORMING POSTS (by engagement rate):
 ${postBlock}
@@ -369,26 +463,34 @@ ${viralBlock}`,
     }],
   });
 
-  const raw = msg.content[0].text;
+  let raw = msg.content[0].text.trim();
+  if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
   let profile;
   try {
     profile = JSON.parse(raw);
   } catch {
-    throw new Error('Profile builder returned malformed JSON');
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { profile = JSON.parse(m[0]); } catch { throw new Error('Profile builder returned malformed JSON'); } }
+    else throw new Error('Profile builder returned malformed JSON');
   }
 
   db.prepare(`
-    INSERT INTO creator_profiles (account_id, user_id, content_pillars, voice_fingerprint, audience_triggers, niche_positioning, visual_style, discovery_brief, strength_summary, built_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO creator_profiles (account_id, user_id, content_pillars, voice_fingerprint, audience_triggers, niche_positioning, visual_style, discovery_brief, strength_summary, emoji_fingerprint, top_hooks, post_count_at_build, built_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     ON CONFLICT(account_id) DO UPDATE SET
-      content_pillars = excluded.content_pillars,
-      voice_fingerprint = excluded.voice_fingerprint,
-      audience_triggers = excluded.audience_triggers,
-      niche_positioning = excluded.niche_positioning,
-      visual_style = excluded.visual_style,
-      discovery_brief = excluded.discovery_brief,
-      strength_summary = excluded.strength_summary,
-      built_at = datetime('now')
+      content_pillars    = excluded.content_pillars,
+      voice_fingerprint  = excluded.voice_fingerprint,
+      audience_triggers  = excluded.audience_triggers,
+      niche_positioning  = excluded.niche_positioning,
+      visual_style       = excluded.visual_style,
+      discovery_brief    = excluded.discovery_brief,
+      strength_summary   = excluded.strength_summary,
+      emoji_fingerprint  = excluded.emoji_fingerprint,
+      top_hooks          = excluded.top_hooks,
+      post_count_at_build = excluded.post_count_at_build,
+      built_at           = datetime('now'),
+      updated_at         = datetime('now')
   `).run(
     accountId, userId,
     JSON.stringify(profile.contentPillars),
@@ -397,7 +499,10 @@ ${viralBlock}`,
     profile.nichePositioning,
     profile.visualStyle,
     profile.discoveryBrief,
-    profile.strengthSummary
+    profile.strengthSummary,
+    JSON.stringify(profile.emojiFingerprint || {}),
+    JSON.stringify(topHooksRaw),
+    currentPostCount
   );
 
   return { accountId, username: account.username, profile };
@@ -458,9 +563,10 @@ async function runIdeator({ group = null, userId } = {}) {
   `).all(...(group ? [userId, group] : [userId]));
 
   const profileBlock = profileRows.length
-    ? '\nCREATOR INTELLIGENCE PROFILES:\n' + profileRows.map(p =>
-        `@${p.username}:\n  Voice: ${p.voice_fingerprint}\n  Pillars: ${p.content_pillars}\n  Triggers: ${p.audience_triggers}\n  Strength: ${p.strength_summary}`
-      ).join('\n\n')
+    ? '\nCREATOR INTELLIGENCE PROFILES:\n' + profileRows.map(p => {
+        const emojiData = p.emoji_fingerprint ? (() => { try { return JSON.parse(p.emoji_fingerprint); } catch { return null; } })() : null;
+        return `@${p.username}:\n  Voice: ${p.voice_fingerprint}\n  Pillars: ${p.content_pillars}\n  Triggers: ${p.audience_triggers}\n  Strength: ${p.strength_summary}${emojiData ? `\n  Emoji style: ${emojiData.usageStyle || ''} — signature: ${emojiData.signature || ''}` : ''}`;
+      }).join('\n\n')
     : '';
 
   const ai = client();
@@ -534,6 +640,8 @@ async function runBulkCaptions({ username, videos, userId }) {
       ).join('\n\n---\n\n')
     : 'No caption history available yet.';
 
+  const emojiData = profile?.emoji_fingerprint ? (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })() : null;
+
   const profileBlock = profile
     ? `CREATOR BRAIN — VOICE & STYLE FINGERPRINT:
 • Voice: ${profile.voice_fingerprint}
@@ -542,7 +650,7 @@ async function runBulkCaptions({ username, videos, userId }) {
 • Niche Position: ${profile.niche_positioning}
 • Visual Style: ${profile.visual_style}
 • Core Strength: ${profile.strength_summary}
-
+${formatEmojiBlock(emojiData)}
 TOP 5 HIGH-PERFORMING HOOKS (replicate cadence, emoji style, sentence structure):
 ${topHooks.map((h, i) => `${i + 1}. "${h}"`).join('\n')}`
     : `No Brain profile built yet for @${username} — using caption history only.`;
@@ -643,6 +751,8 @@ async function runIdeatorV2({ username, userId }) {
       ).join('\n\n')
     : 'No caption data yet.';
 
+  const emojiDataV2 = profile?.emoji_fingerprint ? (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })() : null;
+
   const profileBlock = profile
     ? `\nCREATOR BRAIN:
 • Voice: ${profile.voice_fingerprint}
@@ -650,7 +760,8 @@ async function runIdeatorV2({ username, userId }) {
 • Audience Triggers: ${profile.audience_triggers}
 • Niche: ${profile.niche_positioning}
 • Visual Style: ${profile.visual_style}
-• Core Strength: ${profile.strength_summary}`
+• Core Strength: ${profile.strength_summary}
+${formatEmojiBlock(emojiDataV2)}`
     : '';
 
   const ai = client();

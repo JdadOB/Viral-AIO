@@ -246,6 +246,24 @@ db.exec(`
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, id)'); } catch (e) {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_content_client ON content_items(client_id)'); } catch (e) {}
 
+// ── Brain adaptive-learning columns ──────────────────────────────────────────
+// emoji_fingerprint: JSON blob with per-emoji counts + Claude-generated context
+// top_hooks:         JSON array of verbatim best-performing opening lines
+// post_count_at_build: snapshot of post count so scheduler can detect new data
+// updated_at:        timestamp of last incremental update (vs full rebuild at built_at)
+try { db.exec('ALTER TABLE creator_profiles ADD COLUMN emoji_fingerprint TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE creator_profiles ADD COLUMN top_hooks TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE creator_profiles ADD COLUMN post_count_at_build INTEGER DEFAULT 0'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE creator_profiles ADD COLUMN updated_at TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',
