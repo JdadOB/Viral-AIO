@@ -677,14 +677,7 @@ TOP 5 HIGH-PERFORMING HOOKS (replicate cadence, emoji style, sentence structure)
 ${topHooks.map((h, i) => `${i + 1}. "${h}"`).join('\n')}`
     : `No Brain profile built yet for @${username} — using caption history only.`;
 
-  const ai = client();
-  const msg = await ai.messages.create({
-    model: MODEL,
-    max_tokens: 4500,
-    system: `You are the Writer — a caption specialist who writes in a creator's exact voice. You analyze their language patterns, emoji usage, sentence rhythm, hook style, and personality — then replicate it so convincingly it passes a "did a human write this?" test. You respond ONLY with valid JSON. No markdown, no prose, no code fences.`,
-    messages: [{
-      role: 'user',
-      content: `Write 3 Instagram/TikTok captions per video for @${username}.
+  const preamble = `Write 3 Instagram/TikTok captions per video for @${username}.
 
 CREATOR PROFILE:
 • @${username}${account.full_name ? ` / ${account.full_name}` : ''}
@@ -694,13 +687,9 @@ CREATOR PROFILE:
 ${profileBlock}
 
 BEST-PERFORMING CAPTIONS — study the exact voice, hooks, emoji patterns, sentence length:
-${captionSamples}
+${captionSamples}`;
 
-VIDEOS TO CAPTION:
-${videos.map((v, i) => `${i + 1}. "${v.name}" (${(v.size / (1024 * 1024)).toFixed(1)} MB)`).join('\n')}
-
-Infer the likely video content from each filename. Use it as the caption's content context.
-
+  const outputFormat = `
 Return ONLY this JSON array (no markdown, no extra text):
 [
   {
@@ -715,11 +704,42 @@ Return ONLY this JSON array (no markdown, no extra text):
 
 Per caption rules:
 • text: written in @${username}'s EXACT voice — copy their emoji patterns, slang, sentence rhythm from the samples above
-• First line is the scroll-stopping hook; last line is a CTA matching their real style
+• Base each caption on what you actually SEE in the video keyframes — describe the specific action, location, or moment shown
+• First line is the scroll-stopping hook tied to the visual; last line is a CTA matching their real style
 • style: one word (punchy / storytelling / aspirational / relatable / provocative / conversational)
 • hashtags: 8-12 niche-appropriate tags in the creator's typical style
-• Do NOT use generic AI phrases like "Swipe to see", "Don't forget to like", or "Drop a comment below"`,
-    }],
+• Do NOT use generic AI phrases like "Swipe to see", "Don't forget to like", or "Drop a comment below"`;
+
+  const hasKeyframes = videos.some(v => v.keyframes && v.keyframes.length > 0);
+
+  // Build multimodal content when keyframes are present, plain text otherwise
+  let userContent;
+  if (hasKeyframes) {
+    const parts = [{ type: 'text', text: preamble + '\n\nVIDEOS TO CAPTION — keyframes provided for each:' }];
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i];
+      parts.push({ type: 'text', text: `\n--- VIDEO ${i + 1}: "${v.name}" (${(v.size / (1024 * 1024)).toFixed(1)} MB) ---` });
+      for (const frame of (v.keyframes || [])) {
+        parts.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } });
+      }
+    }
+    parts.push({ type: 'text', text: outputFormat });
+    userContent = parts;
+  } else {
+    userContent = preamble + `
+
+VIDEOS TO CAPTION:
+${videos.map((v, i) => `${i + 1}. "${v.name}" (${(v.size / (1024 * 1024)).toFixed(1)} MB)`).join('\n')}
+
+Infer the likely video content from each filename. Use it as the caption's content context.` + outputFormat;
+  }
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 4500,
+    system: `You are the Writer — a caption specialist who writes in a creator's exact voice. You analyze their language patterns, emoji usage, sentence rhythm, hook style, and personality — then replicate it so convincingly it passes a "did a human write this?" test. When video keyframes are provided, base captions on the actual visual content you observe. You respond ONLY with valid JSON. No markdown, no prose, no code fences.`,
+    messages: [{ role: 'user', content: userContent }],
   });
 
   let raw = msg.content[0].text.trim();
