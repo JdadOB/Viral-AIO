@@ -510,4 +510,202 @@ The top 3 ideas to execute first, ranked by expected impact, and why.
   return { id, group, accountCount: accountQuery.length, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
 
-module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder };
+// ── BULK CAPTION GENERATOR ────────────────────────────────────────────────────
+// Generates 3 creator-voice captions per video using Brain context injection.
+// Videos are identified by filename only — no video processing required.
+
+async function runBulkCaptions({ username, videos, userId }) {
+  if (!videos || !videos.length) throw new Error('No videos provided');
+  if (videos.length > 10) throw new Error('Maximum 10 videos per batch');
+
+  const account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(username, userId);
+  if (!account) throw new Error(`@${username} is not in the database`);
+
+  const captions = getProfileCaptions(username, 20);
+  const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+
+  const topHooks = captions.slice(0, 5)
+    .map(c => (c.caption || '').split('\n')[0].substring(0, 150).trim())
+    .filter(Boolean);
+
+  const captionSamples = captions.length
+    ? captions.slice(0, 8).map(c =>
+        `[${c.post_type} | ER: ${(c.engagement_rate || 0).toFixed(2)}%]\n${(c.caption || '').substring(0, 300)}`
+      ).join('\n\n---\n\n')
+    : 'No caption history available yet.';
+
+  const profileBlock = profile
+    ? `CREATOR BRAIN — VOICE & STYLE FINGERPRINT:
+• Voice: ${profile.voice_fingerprint}
+• Content Pillars: ${profile.content_pillars}
+• Audience Triggers: ${profile.audience_triggers}
+• Niche Position: ${profile.niche_positioning}
+• Visual Style: ${profile.visual_style}
+• Core Strength: ${profile.strength_summary}
+
+TOP 5 HIGH-PERFORMING HOOKS (replicate cadence, emoji style, sentence structure):
+${topHooks.map((h, i) => `${i + 1}. "${h}"`).join('\n')}`
+    : `No Brain profile built yet for @${username} — using caption history only.`;
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 4500,
+    system: `You are the Writer — a caption specialist who writes in a creator's exact voice. You analyze their language patterns, emoji usage, sentence rhythm, hook style, and personality — then replicate it so convincingly it passes a "did a human write this?" test. You respond ONLY with valid JSON. No markdown, no prose, no code fences.`,
+    messages: [{
+      role: 'user',
+      content: `Write 3 Instagram/TikTok captions per video for @${username}.
+
+CREATOR PROFILE:
+• @${username}${account.full_name ? ` / ${account.full_name}` : ''}
+• Followers: ${(account.followers_count || 0).toLocaleString()}
+• Avg ER: ${(account.avg_engagement_rate || 0).toFixed(2)}%
+
+${profileBlock}
+
+BEST-PERFORMING CAPTIONS — study the exact voice, hooks, emoji patterns, sentence length:
+${captionSamples}
+
+VIDEOS TO CAPTION:
+${videos.map((v, i) => `${i + 1}. "${v.name}" (${(v.size / (1024 * 1024)).toFixed(1)} MB)`).join('\n')}
+
+Infer the likely video content from each filename. Use it as the caption's content context.
+
+Return ONLY this JSON array (no markdown, no extra text):
+[
+  {
+    "videoName": "exact_filename_here.MOV",
+    "captions": [
+      {"style": "punchy", "text": "full caption written in creator voice", "hashtags": "#tag1 #tag2 #tag3"},
+      {"style": "storytelling", "text": "full caption written in creator voice", "hashtags": "#tag1 #tag2 #tag3"},
+      {"style": "relatable", "text": "full caption written in creator voice", "hashtags": "#tag1 #tag2 #tag3"}
+    ]
+  }
+]
+
+Per caption rules:
+• text: written in @${username}'s EXACT voice — copy their emoji patterns, slang, sentence rhythm from the samples above
+• First line is the scroll-stopping hook; last line is a CTA matching their real style
+• style: one word (punchy / storytelling / aspirational / relatable / provocative / conversational)
+• hashtags: 8-12 niche-appropriate tags in the creator's typical style
+• Do NOT use generic AI phrases like "Swipe to see", "Don't forget to like", or "Drop a comment below"`,
+    }],
+  });
+
+  let raw = msg.content[0].text.trim();
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  let results;
+  try {
+    results = JSON.parse(raw);
+  } catch {
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try { results = JSON.parse(jsonMatch[0]); }
+      catch { throw new Error('Caption generator returned malformed response — try again'); }
+    } else {
+      throw new Error('Caption generator returned malformed response — try again');
+    }
+  }
+
+  const summary = results.map(r =>
+    `## ${r.videoName}\n\n` +
+    (r.captions || []).map((c, i) =>
+      `### Caption ${i + 1} — ${c.style || ''}\n${c.text}\n\n**Hashtags:** ${c.hashtags || ''}`
+    ).join('\n\n')
+  ).join('\n\n---\n\n');
+
+  const id = saveOutput(
+    'writer',
+    `Bulk captions for @${username} (${videos.length} video${videos.length !== 1 ? 's' : ''})`,
+    summary, null, null, userId
+  );
+
+  return { id, username, videoCount: videos.length, results };
+}
+
+// ── IDEATOR V2 — CONSTRAINT-BASED FRAMEWORK ───────────────────────────────────
+// Generates 3 constraint-typed reel/TikTok ideas per creator: talking-head,
+// b-roll heavy, and engagement bait — each with Hook, Concept, CTA, Trend Alignment.
+
+async function runIdeatorV2({ username, userId }) {
+  const account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(username, userId);
+  if (!account) throw new Error(`@${username} is not in the database`);
+
+  const captions = getProfileCaptions(username, 20);
+  const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+
+  const captionSamples = captions.length
+    ? captions.slice(0, 10).map(c =>
+        `[${c.post_type} | ER: ${(c.engagement_rate || 0).toFixed(2)}%]\n"${(c.caption || '').substring(0, 200).replace(/\n/g, ' ')}"`
+      ).join('\n\n')
+    : 'No caption data yet.';
+
+  const profileBlock = profile
+    ? `\nCREATOR BRAIN:
+• Voice: ${profile.voice_fingerprint}
+• Content Pillars: ${profile.content_pillars}
+• Audience Triggers: ${profile.audience_triggers}
+• Niche: ${profile.niche_positioning}
+• Visual Style: ${profile.visual_style}
+• Core Strength: ${profile.strength_summary}`
+    : '';
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 3200,
+    system: `You are the Ideator — a reel and TikTok strategist who generates ideas that are immediately filmable. You use a Constraint-Based framework: one easy talking-head idea, one aesthetic b-roll idea, and one high-engagement idea designed to maximize comment volume. Every idea is built from the creator's actual data and voice — nothing generic. Each idea should be specific enough to start filming today.`,
+    messages: [{
+      role: 'user',
+      content: `Generate 3 constraint-based Reel/TikTok ideas for @${username}.
+
+CREATOR PROFILE:
+• @${username}${account.full_name ? ` / ${account.full_name}` : ''}
+• Followers: ${(account.followers_count || 0).toLocaleString()}
+• Avg Engagement Rate: ${(account.avg_engagement_rate || 0).toFixed(2)}%
+${profileBlock}
+
+BEST-PERFORMING CONTENT (study what actually works for this creator):
+${captionSamples}
+
+Use the CONSTRAINT-BASED framework. Generate exactly 3 ideas — one per constraint type:
+
+### IDEA 1 — LOW-HANGING FRUIT (Easy Talking Head)
+Minimal production. Phone + good lighting. No B-roll. Can be filmed in one take.
+**Hook:** [The exact verbal opening line said directly to camera — scroll-stopping]
+**Concept:** [What the creator says or does — specific enough to film today, 2-3 sentences]
+**CTA:** [The specific call to action written in this creator's actual voice and style]
+**Trend Alignment:** [Which current short-form format or trend this taps into and why it works now]
+
+### IDEA 2 — B-ROLL HEAVY (Aesthetic / Voiceover)
+No or minimal on-camera talking. Visuals and editing carry the video. Voiceover or text overlays.
+**Hook:** [The visual hook — exactly what the viewer sees in the first 2 seconds]
+**Concept:** [Scene-by-scene: what's filmed, what the voiceover or text overlays say, 2-3 sentences]
+**CTA:** [The specific call to action that fits this creator's style]
+**Trend Alignment:** [Which aesthetic trend, audio style, or editing format this rides — and why now]
+
+### IDEA 3 — ENGAGEMENT BAIT (High-Comment Volume)
+Designed to trigger comments, saves, and shares. Hot take, controversial opinion, helpful tip with a twist, or a question that demands a response.
+**Hook:** [The exact provocative or pattern-interrupting opening line]
+**Concept:** [The angle, take, or tip structure that drives comment volume — 2-3 sentences]
+**CTA:** [A CTA that directly invites engagement — a question, debate prompt, or challenge]
+**Trend Alignment:** [Why this type of content is performing on Reels/TikTok right now]
+
+Close with:
+
+## WHY THESE THREE
+One paragraph explaining why this specific mix fits @${username}'s audience, niche, and content gaps — grounded in their actual data.`,
+    }],
+  });
+
+  const rawOutput = msg.content[0].text;
+  const captain = await runCaptain('Ideator', rawOutput, `Constraint-based reel ideas for @${username}, ${(account.followers_count || 0).toLocaleString()} followers`);
+  const id = saveOutput('ideator', `Ideator: constraint-based ideas for @${username}`, rawOutput, captain.reviewed, captain.notes, userId);
+
+  return { id, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
+}
+
+module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2 };
