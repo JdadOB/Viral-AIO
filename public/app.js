@@ -1,4 +1,4 @@
-const APP_VERSION = '0.50';
+const APP_VERSION = '0.51';
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -1901,6 +1901,15 @@ function showBrainNodeProfile(profile) {
   const content = document.getElementById('brain-panel-content');
   if (!panel || !content) return;
   const pillars = (() => { try { return JSON.parse(profile.content_pillars); } catch { return []; } })();
+  const emojiPrint = (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })();
+  const emojiSection = (emojiPrint && Object.keys(emojiPrint).length)
+    ? `<div class="brain-section"><div class="brain-label">Emoji Fingerprint</div><div class="brain-value">
+        ${emojiPrint.signature ? `<div style="margin-bottom:6px;font-style:italic">${emojiPrint.signature}</div>` : ''}
+        ${(emojiPrint.mustUse||[]).length ? `<div><span style="color:var(--text-dim);font-size:11px">USE: </span>${emojiPrint.mustUse.join(' ')}</div>` : ''}
+        ${(emojiPrint.avoidList||[]).length ? `<div><span style="color:var(--text-dim);font-size:11px">AVOID: </span>${emojiPrint.avoidList.join(' ')}</div>` : ''}
+        ${emojiPrint.usageStyle ? `<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">${emojiPrint.usageStyle}</div>` : ''}
+      </div></div>`
+    : `<div class="brain-section"><div class="brain-label">Emoji Fingerprint</div><div class="brain-value" style="color:var(--text-dim);font-size:12px">Not built yet — rebuild Brain to generate</div></div>`;
   content.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
       <div style="width:48px;height:48px;border-radius:50%;background:var(--bg-3);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--accent);flex-shrink:0">
@@ -1917,6 +1926,7 @@ function showBrainNodeProfile(profile) {
     <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${profile.audience_triggers || '—'}</div></div>
     <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${profile.niche_positioning || '—'}</div></div>
     <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${profile.visual_style || '—'}</div></div>
+    ${emojiSection}
     ${profile.discovery_brief ? `<details class="brain-discovery" style="margin-top:12px"><summary>Find Similar</summary><div class="brain-value" style="margin-top:8px">${profile.discovery_brief}</div></details>` : ''}
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn" style="flex:1;font-size:12px;background:var(--bg-3);border-color:var(--border-strong);color:var(--text-sub)" onclick="rebuildProfile(${profile.account_id})">Rebuild</button>

@@ -57,7 +57,7 @@ function extractEmojiStats(posts) {
 //   Stats format — extractEmojiStats: { topEmojis[], totalUsed, avgPerPost, usageStyle }
 // Returns '' when data is absent so callers never accidentally suppress emojis.
 function formatEmojiBlock(emojiData) {
-  if (!emojiData) return ''; // No profile yet — don't constrain the model
+  if (!emojiData || Object.keys(emojiData).length === 0) return ''; // No profile yet — don't constrain the model
 
   // ── DB / Claude-generated format ─────────────────────────────────────────────
   if (Array.isArray(emojiData.mustUse) || emojiData.signature !== undefined) {
