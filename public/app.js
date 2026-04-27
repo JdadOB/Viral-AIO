@@ -1129,6 +1129,10 @@ $('#poll-btn').addEventListener('click', async () => {
 
 // ── Command Center / Agents ───────────────────────────────────────────────────
 
+// Bulk caption upload state — reset each time the agents page is rendered
+let _bulkFiles = [];
+let _bulkResults = null;
+
 const AGENT_DEF = {
   captain:    { label: 'The Captain',    role: 'Quality Control & Humanizer', icon: 'C', color: '#FF9F0A', bg: 'rgba(255,159,10,0.12)' },
   strategist: { label: 'The Strategist', role: 'Viral Performance Reports',   icon: 'S', color: '#32ADE6', bg: 'rgba(50,173,230,0.12)' },
@@ -1189,6 +1193,8 @@ function showOutputModal(title, output, captainNotes) {
 }
 
 async function renderAgents() {
+  _bulkFiles = [];
+  _bulkResults = null;
   const el = $('#page-agents');
   const accounts = await api('/api/accounts');
 
@@ -1307,6 +1313,83 @@ async function renderAgents() {
         </div>
       </div>
 
+    </div>
+
+    <!-- ── BULK VIDEO CAPTIONS ────────────────────────────────────────── -->
+    <div class="caption-module-section">
+      <div class="caption-section-header">
+        <div class="caption-section-title">Bulk Video <span class="accent">Captions</span></div>
+        <div class="caption-section-sub">Upload up to 10 .MOV files — 3 creator-voice captions generated per video via The Brain</div>
+      </div>
+
+      <div class="agent-card" id="agent-bulk">
+        <div class="agent-header">
+          <div class="agent-icon" style="--icon-color:var(--purple);--icon-bg:rgba(191,90,242,0.12)">B</div>
+          <div class="agent-meta">
+            <div class="agent-name">Bulk Video Captions</div>
+            <div class="agent-role">Context injection from The Brain · 3 unique captions per video</div>
+          </div>
+          <div class="agent-status idle" id="bulk-status"></div>
+        </div>
+        <div class="agent-body">
+          <label>Creator Profile</label>
+          <select class="agent-select" id="bulk-username">
+            <option value="">— Select a tracked account —</option>
+            ${accounts.map(a => `<option value="${a.username}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
+          </select>
+
+          <label style="margin-top:14px">Upload Videos</label>
+          <div class="video-dropzone" id="video-dropzone">
+            <div class="dropzone-icon">▲</div>
+            <div class="dropzone-title">Drop .MOV files here or <span class="dropzone-link">click to browse</span></div>
+            <div class="dropzone-hint">Max 10 videos per batch · .MOV format only · 500 MB max per file</div>
+            <input type="file" id="video-file-input" accept=".mov,video/quicktime" multiple style="display:none">
+          </div>
+
+          <div id="video-file-list" class="video-file-list"></div>
+          <div id="bulk-error-msg" class="bulk-error-msg" style="display:none"></div>
+
+          <button class="btn btn-accent" id="bulk-generate-btn"
+            style="width:100%;margin-top:14px;background:var(--purple);border-color:var(--purple)">
+            Generate Captions
+          </button>
+        </div>
+      </div>
+
+      <div id="bulk-caption-results" class="bulk-caption-results" style="display:none"></div>
+    </div>
+
+    <!-- ── THE IDEATOR ─────────────────────────────────────────────────── -->
+    <div class="caption-module-section">
+      <div class="caption-section-header">
+        <div class="caption-section-title">The <span class="accent">Ideator</span></div>
+        <div class="caption-section-sub">Constraint-based Reel &amp; TikTok concepts — Low-Hanging Fruit · B-Roll Heavy · Engagement Bait</div>
+      </div>
+
+      <div class="agent-card" id="agent-ideator-v2">
+        <div class="agent-header">
+          <div class="agent-icon" style="--icon-color:#FF6B6B;--icon-bg:rgba(255,107,107,0.12)">I</div>
+          <div class="agent-meta">
+            <div class="agent-name">The Ideator</div>
+            <div class="agent-role">3 constraint-typed ideas · Hook · Concept · CTA · Trend Alignment</div>
+          </div>
+          <div class="agent-status idle" id="ideator-v2-status"></div>
+        </div>
+        <div class="agent-body">
+          <p>Generates 3 ready-to-film Reel/TikTok concepts built around a specific creator's Brain profile. Each idea is production-typed — easy talking head, cinematic B-roll, or comment-driving engagement bait — so there's a concept for every filming day.</p>
+          <label>Creator Profile</label>
+          <select class="agent-select" id="ideator-v2-username">
+            <option value="">— Select a creator —</option>
+            ${accounts.map(a => `<option value="${a.username}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
+          </select>
+          <button class="btn btn-accent" id="ideator-v2-run-btn"
+            style="width:100%;margin-top:14px;background:#FF6B6B;border-color:#FF6B6B">
+            Generate Ideas
+          </button>
+        </div>
+      </div>
+
+      <div id="ideator-v2-output" class="ideator-v2-output" style="display:none"></div>
     </div>
 
     <!-- History -->
@@ -1501,6 +1584,280 @@ function wireAgentButtons() {
   $('#output-modal').addEventListener('click', e => {
     if (e.target === $('#output-modal')) $('#output-modal').classList.add('hidden');
   });
+
+  // ── BULK VIDEO CAPTIONS ──────────────────────────────────────────────────────
+  const dropzone  = $('#video-dropzone');
+  const fileInput = $('#video-file-input');
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleBulkFileSelection(Array.from(e.dataTransfer.files));
+  });
+  fileInput.addEventListener('change', () => {
+    handleBulkFileSelection(Array.from(fileInput.files));
+    fileInput.value = '';
+  });
+
+  $('#bulk-generate-btn').addEventListener('click', async () => {
+    const username = $('#bulk-username').value;
+    if (!username) return toast('Select a creator profile first', 'error');
+    if (!_bulkFiles.length) return toast('Add at least one .MOV video first', 'error');
+    const btn = $('#bulk-generate-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating...';
+    setAgentStatus('bulk', 'running');
+    try {
+      const videos = _bulkFiles.map(f => ({ name: f.name, size: f.size }));
+      const result = await api('/api/agents/bulk-captions', { method: 'POST', body: { username, videos } });
+      _bulkResults = result.results;
+      setAgentStatus('bulk', 'done');
+      renderBulkCaptionResults(result.results);
+      toast(`${result.videoCount} video${result.videoCount !== 1 ? 's' : ''} processed — captions ready`, 'success');
+      loadAgentHistory();
+    } catch (err) {
+      setAgentStatus('bulk', 'idle');
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Generate Captions';
+    }
+  });
+
+  // ── THE IDEATOR V2 ───────────────────────────────────────────────────────────
+  $('#ideator-v2-run-btn').addEventListener('click', async () => {
+    const username = $('#ideator-v2-username').value;
+    if (!username) return toast('Select a creator first', 'error');
+    const btn = $('#ideator-v2-run-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating ideas...';
+    setAgentStatus('ideator-v2', 'running');
+    try {
+      const result = await api('/api/agents/ideator-v2', { method: 'POST', body: { username } });
+      setAgentStatus('ideator-v2', 'done');
+      renderIdeatorV2Output(result.reviewed, result.captainNotes);
+      toast('Ideas ready', 'success');
+      loadAgentHistory();
+    } catch (err) {
+      setAgentStatus('ideator-v2', 'idle');
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Generate Ideas';
+    }
+  });
+}
+
+// ── Bulk caption helpers ──────────────────────────────────────────────────────
+
+function handleBulkFileSelection(files) {
+  const MAX_SIZE = 500 * 1024 * 1024;
+  const errEl = $('#bulk-error-msg');
+  const errors = [];
+
+  const nonMov = files.filter(f => !f.name.toLowerCase().endsWith('.mov'));
+  if (nonMov.length) {
+    errors.push(`Invalid format — only .MOV files accepted. Skipped: ${nonMov.map(f => f.name).join(', ')}`);
+  }
+  files = files.filter(f => f.name.toLowerCase().endsWith('.mov'));
+
+  const oversized = files.filter(f => f.size > MAX_SIZE);
+  if (oversized.length) {
+    errors.push(`File too large (max 500 MB). Skipped: ${oversized.map(f => f.name).join(', ')}`);
+    files = files.filter(f => f.size <= MAX_SIZE);
+  }
+
+  const merged = [..._bulkFiles, ...files];
+  if (merged.length > 10) {
+    errors.push('Max 10 videos reached — only the first 10 are kept.');
+    _bulkFiles = merged.slice(0, 10);
+  } else {
+    _bulkFiles = merged;
+  }
+
+  if (errors.length) {
+    errEl.textContent = errors.join(' ');
+    errEl.style.display = 'block';
+  } else {
+    errEl.style.display = 'none';
+  }
+
+  renderBulkFileList();
+}
+
+function renderBulkFileList() {
+  const list = $('#video-file-list');
+  if (!list) return;
+  if (!_bulkFiles.length) { list.innerHTML = ''; return; }
+  list.innerHTML = `
+    <div class="video-file-list-header">
+      <span>${_bulkFiles.length} / 10 video${_bulkFiles.length !== 1 ? 's' : ''} queued</span>
+      <button class="vfl-clear-btn" id="bulk-clear-all">Clear all</button>
+    </div>
+    ${_bulkFiles.map((f, i) => `
+      <div class="video-file-item">
+        <div class="video-file-icon">▶</div>
+        <div class="video-file-info">
+          <div class="video-file-name">${escapeHtml(f.name)}</div>
+          <div class="video-file-size">${formatFileSize(f.size)}</div>
+        </div>
+        <button class="video-file-remove" data-idx="${i}" title="Remove">✕</button>
+      </div>
+    `).join('')}
+  `;
+  $('#bulk-clear-all').addEventListener('click', () => {
+    _bulkFiles = [];
+    renderBulkFileList();
+    $('#bulk-error-msg').style.display = 'none';
+  });
+  $$('#video-file-list .video-file-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _bulkFiles.splice(parseInt(btn.dataset.idx), 1);
+      renderBulkFileList();
+      if (_bulkFiles.length <= 10) $('#bulk-error-msg').style.display = 'none';
+    });
+  });
+}
+
+function renderBulkCaptionResults(results) {
+  const container = $('#bulk-caption-results');
+  if (!container) return;
+  container.style.display = 'block';
+  container.innerHTML = results.map((video, vi) => `
+    <div class="caption-video-group">
+      <div class="caption-video-header">
+        <span class="caption-video-icon">▶</span>
+        <span class="caption-video-name">${escapeHtml(video.videoName)}</span>
+        <span class="caption-count">${(video.captions || []).length} captions</span>
+      </div>
+      <div class="caption-cards-row">
+        ${(video.captions || []).map((cap, ci) => `
+          <div class="caption-card">
+            <div class="caption-card-top">
+              <span class="caption-num">Caption ${ci + 1}</span>
+              <span class="caption-style-badge">${escapeHtml(cap.style || 'default')}</span>
+              <button class="caption-copy-btn" data-vi="${vi}" data-ci="${ci}">Copy</button>
+            </div>
+            <div class="caption-card-text">${escapeHtml(cap.text || '')}</div>
+            ${cap.hashtags ? `<div class="caption-card-tags">${escapeHtml(cap.hashtags)}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  $$('#bulk-caption-results .caption-copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { vi, ci } = btn.dataset;
+      const cap = _bulkResults[vi].captions[ci];
+      const text = (cap.text || '') + (cap.hashtags ? '\n\n' + cap.hashtags : '');
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = '✓ Copied';
+        btn.style.color = 'var(--green)';
+        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2200);
+      }).catch(() => toast('Copy failed — try selecting and copying manually', 'error'));
+    });
+  });
+}
+
+function formatFileSize(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 ** 3)).toFixed(1) + ' GB';
+  if (bytes >= 1024 * 1024)        return (bytes / (1024 ** 2)).toFixed(1) + ' MB';
+  if (bytes >= 1024)               return (bytes / 1024).toFixed(1) + ' KB';
+  return bytes + ' B';
+}
+
+// ── Ideator V2 helpers ────────────────────────────────────────────────────────
+
+function parseIdeatorV2Ideas(text) {
+  const ideas = [];
+  const sections = text.split(/(?=### IDEA \d)/);
+
+  for (const section of sections) {
+    if (!section.trim() || !section.startsWith('### IDEA')) continue;
+    const headerMatch = section.match(/^### IDEA \d+ — ([^\n]+)/);
+    if (!headerMatch) continue;
+
+    const headerText = headerMatch[1];
+    const typeMatch  = headerText.match(/^([A-Z][A-Z\-\s]+?)(?:\s*\((.+?)\))?$/);
+    const type  = typeMatch ? typeMatch[1].trim() : headerText;
+    const title = (typeMatch && typeMatch[2]) ? typeMatch[2].trim() : '';
+
+    const extract = keys => {
+      for (const key of [].concat(keys)) {
+        const re = new RegExp(`\\*\\*${key}[:\\s]*\\*\\*\\s*([\\s\\S]*?)(?=\\n\\n\\*\\*|\\n\\*\\*|\\n###|\\n##|$)`, 'i');
+        const m = section.match(re);
+        if (m) return m[1].trim();
+      }
+      return '';
+    };
+
+    ideas.push({
+      type,
+      title,
+      hook:    extract(['Hook']),
+      concept: extract(['Concept', 'The Concept']),
+      cta:     extract(['CTA', 'Call to Action', 'Call-to-Action']),
+      trend:   extract(['Trend Alignment', 'Trend']),
+    });
+  }
+
+  const whyMatch  = text.match(/## WHY THESE (?:THREE|3)[^\n]*\n([\s\S]*)$/i);
+  ideas.why = whyMatch ? whyMatch[1].trim() : '';
+  return ideas;
+}
+
+function renderIdeatorV2Output(text, captainNotes) {
+  const container = $('#ideator-v2-output');
+  if (!container) return;
+  container.style.display = 'block';
+
+  const ideas = parseIdeatorV2Ideas(text);
+  const CARD_COLORS  = ['var(--green)', 'var(--cyan)', '#FF6B6B'];
+  const CARD_LABELS  = ['LOW-HANGING FRUIT', 'B-ROLL HEAVY', 'ENGAGEMENT BAIT'];
+  const CARD_DESCS   = ['Easy Talking Head', 'Aesthetic / Voiceover', 'High-Comment Volume'];
+
+  if (ideas.length >= 1) {
+    container.innerHTML = `
+      <div class="ideator-v2-cards">
+        ${ideas.slice(0, 3).map((idea, i) => {
+          const color = CARD_COLORS[i];
+          const label = idea.type || CARD_LABELS[i] || '';
+          const desc  = idea.title || CARD_DESCS[i] || '';
+          return `
+            <div class="ideator-v2-card" style="--card-color:${color}">
+              <div class="iv2-card-header">
+                <div class="iv2-type" style="color:${color}">${escapeHtml(label)}</div>
+                ${desc ? `<div class="iv2-desc">${escapeHtml(desc)}</div>` : ''}
+              </div>
+              <div class="iv2-card-body">
+                ${idea.hook    ? `<div class="iv2-field"><div class="iv2-label">HOOK</div><div class="iv2-value">${escapeHtml(idea.hook)}</div></div>` : ''}
+                ${idea.concept ? `<div class="iv2-field"><div class="iv2-label">CONCEPT</div><div class="iv2-value">${escapeHtml(idea.concept)}</div></div>` : ''}
+                ${idea.cta     ? `<div class="iv2-field"><div class="iv2-label">CTA</div><div class="iv2-value">${escapeHtml(idea.cta)}</div></div>` : ''}
+                ${idea.trend   ? `<div class="iv2-field iv2-trend"><div class="iv2-label">TREND ALIGNMENT</div><div class="iv2-value">${escapeHtml(idea.trend)}</div></div>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      ${ideas.why ? `
+        <div class="iv2-why-block">
+          <div class="iv2-why-label">WHY THESE THREE</div>
+          <div class="iv2-why-text">${escapeHtml(ideas.why)}</div>
+        </div>` : ''}
+      ${captainNotes ? `
+        <div class="captain-notes" style="margin-top:16px">
+          <div class="captain-notes-label">Captain's Notes</div>
+          ${captainNotes}
+        </div>` : ''}
+    `;
+  } else {
+    // Fallback: plain markdown render
+    container.innerHTML = `<div class="agent-output-panel open">${renderMarkdown(text)}</div>`;
+  }
 }
 
 // ── Brain 3D Engine ───────────────────────────────────────────────────────────

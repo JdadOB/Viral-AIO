@@ -61,7 +61,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2 } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -697,6 +697,36 @@ app.post('/api/agents/ideator', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[Agent:Ideator]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agents/bulk-captions', requireAuth, async (req, res) => {
+  try {
+    const { username, videos } = req.body;
+    if (!username) return res.status(400).json({ error: 'username required' });
+    if (!Array.isArray(videos) || !videos.length) return res.status(400).json({ error: 'videos array required' });
+    if (videos.length > 10) return res.status(400).json({ error: 'Maximum 10 videos per batch' });
+    const invalid = videos.filter(v => !v.name || typeof v.name !== 'string');
+    if (invalid.length) return res.status(400).json({ error: 'Each video must have a name field' });
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'agent_run', { agent: 'bulk-captions', username, videoCount: videos.length });
+    const result = await runBulkCaptions({ username, videos, userId: req.scopedUserId });
+    res.json(result);
+  } catch (err) {
+    console.error('[Agent:BulkCaptions]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agents/ideator-v2', requireAuth, async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'username required' });
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'agent_run', { agent: 'ideator-v2', username });
+    const result = await runIdeatorV2({ username, userId: req.scopedUserId });
+    res.json(result);
+  } catch (err) {
+    console.error('[Agent:IdeatorV2]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
