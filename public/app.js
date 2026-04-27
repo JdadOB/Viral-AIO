@@ -1038,6 +1038,96 @@ async function renderSettings() {
     <button class="btn btn-accent" id="save-settings-btn">Save Settings</button>
   `;
 
+  // Append Google Sheets settings card
+  const sheetsCard = document.createElement('div');
+  sheetsCard.className = 'settings-card';
+  sheetsCard.style.marginTop = '16px';
+  sheetsCard.innerHTML = `
+    <div class="settings-row">
+      <div class="setting-item" style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px">
+        <label style="font-size:15px;font-weight:600;color:var(--text-main)">📊 Google Sheets Export</label>
+        <span class="hint">Export captions directly to a client's Google Sheet. Share the sheet with the service account first.</span>
+      </div>
+      <div class="setting-item">
+        <label>Google Sheet URL</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="s-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="max-width:420px">
+          <button class="btn btn-cyan" id="sheets-test-btn" style="padding:7px 14px;white-space:nowrap">Test Connection</button>
+        </div>
+        <span class="hint" id="sheets-connection-status">Paste your Google Sheet URL and test the connection.</span>
+      </div>
+      <div class="setting-item">
+        <label>Tab Mode</label>
+        <select id="s-sheet-tab-mode" style="max-width:260px">
+          <option value="date">Auto — match today's date (e.g. "Apr 28")</option>
+          <option value="manual">Manual — always write to a specific tab</option>
+        </select>
+        <span class="hint">Auto mode matches your existing tab naming convention.</span>
+      </div>
+      <div class="setting-item" id="sheets-manual-tab-row" style="display:none">
+        <label>Tab Name</label>
+        <input type="text" id="s-sheet-manual-tab" placeholder="e.g. Sheet1" style="max-width:220px">
+      </div>
+      <button class="btn btn-accent" id="save-sheets-btn">Save Sheet Config</button>
+    </div>
+  `;
+  el.appendChild(sheetsCard);
+
+  // Load existing sheet config
+  try {
+    const cfg = await api('/api/sheets/config');
+    if (cfg.sheetId) $('#s-sheet-url').value = `https://docs.google.com/spreadsheets/d/${cfg.sheetId}`;
+    if (cfg.tabMode) $('#s-sheet-tab-mode').value = cfg.tabMode;
+    if (cfg.manualTab) $('#s-sheet-manual-tab').value = cfg.manualTab;
+    if (cfg.tabMode === 'manual') $('#sheets-manual-tab-row').style.display = 'block';
+  } catch { /* no config yet */ }
+
+  $('#s-sheet-tab-mode').addEventListener('change', () => {
+    $('#sheets-manual-tab-row').style.display =
+      $('#s-sheet-tab-mode').value === 'manual' ? 'block' : 'none';
+  });
+
+  $('#sheets-test-btn').addEventListener('click', async () => {
+    const btn = $('#sheets-test-btn');
+    const status = $('#sheets-connection-status');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Testing...';
+    try {
+      const result = await api('/api/sheets/validate', {
+        method: 'POST',
+        body: { sheetUrl: $('#s-sheet-url').value },
+      });
+      status.innerHTML = `<span style="color:var(--green)">✓ Connected: "${result.title}" — tabs: ${result.tabs.join(', ')}</span>`;
+    } catch (err) {
+      status.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Test Connection';
+    }
+  });
+
+  $('#save-sheets-btn').addEventListener('click', async () => {
+    const btn = $('#save-sheets-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving...';
+    try {
+      await api('/api/sheets/config', {
+        method: 'POST',
+        body: {
+          sheetUrl: $('#s-sheet-url').value,
+          tabMode:  $('#s-sheet-tab-mode').value,
+          manualTab: $('#s-sheet-manual-tab').value,
+        },
+      });
+      toast('Sheet config saved', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Sheet Config';
+    }
+  });
+
   $('#discord-test-btn').addEventListener('click', async () => {
     const btn = $('#discord-test-btn');
     btn.disabled = true;
@@ -1459,6 +1549,70 @@ function setAgentStatus(agent, status) {
   }
 }
 
+// ── Google Sheets Export Button ───────────────────────────────────────────────
+
+function addSheetsExportButton(panelId, outputId, username) {
+  const panel = $(`#${panelId}`);
+  if (!panel || !outputId) return;
+
+  // Remove existing export button if any
+  panel.querySelector('.sheets-export-btn-wrap')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'sheets-export-btn-wrap';
+  wrap.style.cssText = 'margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.style.cssText = 'border-color:var(--green);color:var(--green);display:flex;align-items:center;gap:6px';
+  btn.innerHTML = '📊 Export to Google Sheet';
+
+  // Date picker for tab override
+  const datePicker = document.createElement('input');
+  datePicker.type = 'date';
+  datePicker.className = 'agent-input';
+  datePicker.style.cssText = 'max-width:160px;font-size:12px;padding:6px 10px';
+  datePicker.value = new Date().toISOString().slice(0, 10);
+  datePicker.title = 'Which date tab to export to';
+
+  const statusSpan = document.createElement('span');
+  statusSpan.style.cssText = 'font-size:12px;color:var(--text-sub)';
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Exporting...';
+    statusSpan.textContent = '';
+    try {
+      const result = await api('/api/sheets/export-output', {
+        method: 'POST',
+        body: { outputId, date: datePicker.value },
+      });
+      btn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--green)">✓ ${result.message}</span>`;
+      toast(result.message, 'success');
+    } catch (err) {
+      btn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+      // If no sheet configured, offer to go to settings
+      if (err.message.includes('No Google Sheet configured')) {
+        const link = document.createElement('a');
+        link.href = '#settings';
+        link.style.cssText = 'font-size:12px;color:var(--cyan);margin-left:8px';
+        link.textContent = 'Set up in Settings →';
+        link.addEventListener('click', e => { e.preventDefault(); navigate('settings'); window.location.hash = 'settings'; });
+        statusSpan.appendChild(link);
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(datePicker);
+  wrap.appendChild(statusSpan);
+  panel.appendChild(wrap);
+}
+
 function showAgentOutput(panelId, text) {
   const panel = $(`#${panelId}`);
   if (!panel) return;
@@ -1502,6 +1656,8 @@ function wireAgentButtons() {
       const result = await api('/api/agents/writer', { method: 'POST', body: { username, contentGoal } });
       setAgentStatus('writer', 'done');
       showAgentOutput('writer-output', result.reviewed);
+      // Add export button
+      addSheetsExportButton('writer-output', result.id, username);
       toast('Captions ready', 'success');
       loadAgentHistory();
     } catch (err) {
@@ -1627,6 +1783,8 @@ function wireAgentButtons() {
       _bulkResults = result.results;
       setAgentStatus('bulk', 'done');
       renderBulkCaptionResults(result.results);
+      // Add export button below bulk results
+      addSheetsExportButton('bulk-caption-results', result.id, username);
       toast(`${result.videoCount} video${result.videoCount !== 1 ? 's' : ''} processed — captions ready`, 'success');
       loadAgentHistory();
     } catch (err) {

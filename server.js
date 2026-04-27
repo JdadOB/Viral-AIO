@@ -1026,6 +1026,14 @@ app.delete('/api/content/:id', requireManager, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Google Sheets Integration ───────────────────────────────────────────────
+try {
+  require('./sheets-routes')(app, { requireAuth, requireManager, db, getUserSetting, setUserSetting, userRole, logActivity });
+  console.log('[Sheets] Google Sheets routes mounted');
+} catch (e) {
+  console.warn('[Sheets] Routes not loaded:', e.message);
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3000;
