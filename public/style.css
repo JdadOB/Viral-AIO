@@ -267,6 +267,14 @@ select option { background: var(--bg-2); }
 }
 .theme-toggle:hover { background: var(--bg-4); color: var(--text-main); }
 .theme-toggle-icon { font-size: 13px; }
+.app-version {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  font-feature-settings: "tnum";
+  opacity: 0.5;
+}
 
 /* ── Main ──────────────────────────────────────────────────── */
 .main {
