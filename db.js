@@ -264,6 +264,20 @@ try { db.exec('ALTER TABLE creator_profiles ADD COLUMN updated_at TEXT'); } catc
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
 
+// ── Per-account Google Sheets config ─────────────────────────────────────────
+try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_sheet_id TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec("ALTER TABLE accounts ADD COLUMN sheets_tab_mode TEXT DEFAULT 'date'"); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_manual_tab TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_col_map TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',

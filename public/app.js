@@ -1038,96 +1038,6 @@ async function renderSettings() {
     <button class="btn btn-accent" id="save-settings-btn">Save Settings</button>
   `;
 
-  // Append Google Sheets settings card
-  const sheetsCard = document.createElement('div');
-  sheetsCard.className = 'settings-card';
-  sheetsCard.style.marginTop = '16px';
-  sheetsCard.innerHTML = `
-    <div class="settings-row">
-      <div class="setting-item" style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px">
-        <label style="font-size:15px;font-weight:600;color:var(--text-main)">📊 Google Sheets Export</label>
-        <span class="hint">Export captions directly to a client's Google Sheet. Share the sheet with the service account first.</span>
-      </div>
-      <div class="setting-item">
-        <label>Google Sheet URL</label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input type="text" id="s-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="max-width:420px">
-          <button class="btn btn-cyan" id="sheets-test-btn" style="padding:7px 14px;white-space:nowrap">Test Connection</button>
-        </div>
-        <span class="hint" id="sheets-connection-status">Paste your Google Sheet URL and test the connection.</span>
-      </div>
-      <div class="setting-item">
-        <label>Tab Mode</label>
-        <select id="s-sheet-tab-mode" style="max-width:260px">
-          <option value="date">Auto — match today's date (e.g. "Apr 28")</option>
-          <option value="manual">Manual — always write to a specific tab</option>
-        </select>
-        <span class="hint">Auto mode matches your existing tab naming convention.</span>
-      </div>
-      <div class="setting-item" id="sheets-manual-tab-row" style="display:none">
-        <label>Tab Name</label>
-        <input type="text" id="s-sheet-manual-tab" placeholder="e.g. Sheet1" style="max-width:220px">
-      </div>
-      <button class="btn btn-accent" id="save-sheets-btn">Save Sheet Config</button>
-    </div>
-  `;
-  el.appendChild(sheetsCard);
-
-  // Load existing sheet config
-  try {
-    const cfg = await api('/api/sheets/config');
-    if (cfg.sheetId) $('#s-sheet-url').value = `https://docs.google.com/spreadsheets/d/${cfg.sheetId}`;
-    if (cfg.tabMode) $('#s-sheet-tab-mode').value = cfg.tabMode;
-    if (cfg.manualTab) $('#s-sheet-manual-tab').value = cfg.manualTab;
-    if (cfg.tabMode === 'manual') $('#sheets-manual-tab-row').style.display = 'block';
-  } catch { /* no config yet */ }
-
-  $('#s-sheet-tab-mode').addEventListener('change', () => {
-    $('#sheets-manual-tab-row').style.display =
-      $('#s-sheet-tab-mode').value === 'manual' ? 'block' : 'none';
-  });
-
-  $('#sheets-test-btn').addEventListener('click', async () => {
-    const btn = $('#sheets-test-btn');
-    const status = $('#sheets-connection-status');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Testing...';
-    try {
-      const result = await api('/api/sheets/validate', {
-        method: 'POST',
-        body: { sheetUrl: $('#s-sheet-url').value },
-      });
-      status.innerHTML = `<span style="color:var(--green)">✓ Connected: "${result.title}" — tabs: ${result.tabs.join(', ')}</span>`;
-    } catch (err) {
-      status.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Test Connection';
-    }
-  });
-
-  $('#save-sheets-btn').addEventListener('click', async () => {
-    const btn = $('#save-sheets-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Saving...';
-    try {
-      await api('/api/sheets/config', {
-        method: 'POST',
-        body: {
-          sheetUrl: $('#s-sheet-url').value,
-          tabMode:  $('#s-sheet-tab-mode').value,
-          manualTab: $('#s-sheet-manual-tab').value,
-        },
-      });
-      toast('Sheet config saved', 'success');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Save Sheet Config';
-    }
-  });
-
   $('#discord-test-btn').addEventListener('click', async () => {
     const btn = $('#discord-test-btn');
     btn.disabled = true;
@@ -1357,8 +1267,9 @@ async function renderAgents() {
           <label>Creator Profile</label>
           <select class="agent-select" id="writer-username">
             <option value="">— Select a tracked account —</option>
-            ${accounts.map(a => `<option value="${a.username}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
+            ${accounts.map(a => `<option value="${a.username}" data-account-id="${a.id}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
           </select>
+          <div id="writer-sheet-status" style="margin-top:6px"></div>
           <label>Content Goal (optional)</label>
           <input class="agent-input" id="writer-goal" type="text" placeholder="e.g. promote new drop, drive DMs, build hype">
           <button class="btn btn-accent" id="writer-run-btn" style="width:100%;margin-top:10px;background:var(--green);border-color:var(--green)">Write Captions</button>
@@ -1429,8 +1340,9 @@ async function renderAgents() {
           <label>Creator Profile</label>
           <select class="agent-select" id="bulk-username">
             <option value="">— Select a tracked account —</option>
-            ${accounts.map(a => `<option value="${a.username}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
+            ${accounts.map(a => `<option value="${a.username}" data-account-id="${a.id}">@${a.username} (${(a.followers_count||0).toLocaleString()} followers)</option>`).join('')}
           </select>
+          <div id="bulk-sheet-status" style="margin-top:6px"></div>
 
           <label style="margin-top:14px">Upload Videos</label>
           <div class="video-dropzone" id="video-dropzone">
@@ -1551,7 +1463,7 @@ function setAgentStatus(agent, status) {
 
 // ── Google Sheets Export Button ───────────────────────────────────────────────
 
-function addSheetsExportButton(panelId, outputId, username) {
+function addSheetsExportButton(panelId, outputId, username, ccountId) {
   const panel = $(`#${panelId}`);
   if (!panel || !outputId) return;
 
@@ -1583,23 +1495,21 @@ function addSheetsExportButton(panelId, outputId, username) {
     btn.innerHTML = '<span class="spinner"></span> Exporting...';
     statusSpan.textContent = '';
     try {
-      const result = await api('/api/sheets/export-output', {
-        method: 'POST',
-        body: { outputId, date: datePicker.value },
-      });
+      const body = { outputId, date: datePicker.value };
+      if (ccountId) body.ccountId = ccountId;
+      const result = await api('/api/sheets/export-output', { method: 'POST', body });
       btn.innerHTML = '📊 Export to Google Sheet';
       statusSpan.innerHTML = `<span style="color:var(--green)">✓ ${result.message}</span>`;
       toast(result.message, 'success');
     } catch (err) {
       btn.innerHTML = '📊 Export to Google Sheet';
       statusSpan.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
-      // If no sheet configured, offer to go to settings
       if (err.message.includes('No Google Sheet configured')) {
         const link = document.createElement('a');
-        link.href = '#settings';
+        link.href = '#';
         link.style.cssText = 'font-size:12px;color:var(--cyan);margin-left:8px';
-        link.textContent = 'Set up in Settings →';
-        link.addEventListener('click', e => { e.preventDefault(); navigate('settings'); window.location.hash = 'settings'; });
+        link.textContent = 'Configure sheet →';
+        link.addEventListener('click', e => { e.preventDefault(); });
         statusSpan.appendChild(link);
       }
     } finally {
@@ -1611,6 +1521,127 @@ function addSheetsExportButton(panelId, outputId, username) {
   wrap.appendChild(datePicker);
   wrap.appendChild(statusSpan);
   panel.appendChild(wrap);
+}
+
+// ── Per-account Google Sheets inline panel ────────────────────────────────────
+
+function wireAccountSheetPanel(selectId, statusId) {
+  const sel = $(`#${selectId}`);
+  const statusDiv = $(`#${statusId}`);
+  if (!sel || !statusDiv) return;
+
+  sel.addEventListener('change', () => {
+    const opt = sel.options[sel.selectedIndex];
+    const accountId = opt ? opt.dataset.accountId : null;
+    if (accountId) {
+      loadAccountSheetStatus(accountId, statusDiv);
+    } else {
+      statusDiv.innerHTML = '';
+    }
+  });
+}
+
+async function loadAccountSheetStatus(accountId, statusDiv) {
+  statusDiv.innerHTML = '<span style="font-size:12px;color:var(--text-sub)">📊 Loading...</span>';
+  let cfg = { sheetId: '', tabMode: 'date', manualTab: '' };
+  try { cfg = await api(`/api/accounts/${accountId}/sheets`); } catch { /* no config */ }
+
+  const label = cfg.sheetId
+    ? `📊 Sheet: <span style="color:var(--green)">${cfg.sheetId.slice(0, 18)}…</span>`
+    : `📊 Sheet: <span style="color:var(--text-sub)">Not configured</span>`;
+
+  statusDiv.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--text-sub)">${label}</span>
+      <a href="#" class="acct-sheet-cfg-link" style="font-size:12px;color:var(--cyan)">Configure</a>
+    </div>
+    <div class="acct-sheet-panel" style="display:none;margin-top:10px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px">
+      <div style="margin-bottom:10px">
+        <label style="display:block;margin-bottom:4px;font-size:12px">Google Sheet URL</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" class="agent-input acct-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="max-width:340px;font-size:12px;padding:6px 10px" value="${cfg.sheetId ? `https://docs.google.com/spreadsheets/d/${cfg.sheetId}` : ''}">
+          <button class="btn btn-cyan acct-sheet-test-btn" style="padding:6px 12px;white-space:nowrap;font-size:12px">Test Connection</button>
+        </div>
+        <span class="hint acct-sheet-test-status" style="margin-top:4px;display:block"></span>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;margin-bottom:4px;font-size:12px">Tab Mode</label>
+        <select class="acct-sheet-tab-mode" style="max-width:260px;font-size:12px">
+          <option value="date" ${cfg.tabMode !== 'manual' ? 'selected' : ''}>Auto — match today's date</option>
+          <option value="manual" ${cfg.tabMode === 'manual' ? 'selected' : ''}>Manual — always write to a specific tab</option>
+        </select>
+      </div>
+      <div class="acct-sheet-manual-row" style="display:${cfg.tabMode === 'manual' ? 'block' : 'none'};margin-bottom:10px">
+        <label style="display:block;margin-bottom:4px;font-size:12px">Tab Name</label>
+        <input type="text" class="agent-input acct-sheet-manual-tab" placeholder="e.g. Sheet1" style="max-width:220px;font-size:12px;padding:6px 10px" value="${cfg.manualTab || ''}">
+      </div>
+      <button class="btn btn-accent acct-sheet-save-btn" style="width:100%;font-size:12px">Save</button>
+      <span class="acct-sheet-save-status" style="font-size:12px;margin-top:6px;display:block"></span>
+    </div>
+  `;
+
+  wireAccountSheetPanelEvents(statusDiv, accountId);
+}
+
+function wireAccountSheetPanelEvents(statusDiv, accountId) {
+  const configureLink = statusDiv.querySelector('.acct-sheet-cfg-link');
+  const panel         = statusDiv.querySelector('.acct-sheet-panel');
+  const tabModeSelect = statusDiv.querySelector('.acct-sheet-tab-mode');
+  const manualRow     = statusDiv.querySelector('.acct-sheet-manual-row');
+  const testBtn       = statusDiv.querySelector('.acct-sheet-test-btn');
+  const testStatus    = statusDiv.querySelector('.acct-sheet-test-status');
+  const saveBtn       = statusDiv.querySelector('.acct-sheet-save-btn');
+  const saveStatus    = statusDiv.querySelector('.acct-sheet-save-status');
+
+  configureLink.addEventListener('click', e => {
+    e.preventDefault();
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+
+  tabModeSelect.addEventListener('change', () => {
+    manualRow.style.display = tabModeSelect.value === 'manual' ? 'block' : 'none';
+  });
+
+  testBtn.addEventListener('click', async () => {
+    testBtn.disabled = true;
+    testBtn.innerHTML = '<span class="spinner"></span> Testing...';
+    testStatus.textContent = '';
+    try {
+      const result = await api('/api/sheets/validate', {
+        method: 'POST',
+        body: { sheetUrl: statusDiv.querySelector('.acct-sheet-url').value },
+      });
+      testStatus.innerHTML = `<span style="color:var(--green)">✓ Connected: "${result.title}" — tabs: ${result.tabs.join(', ')}</span>`;
+    } catch (err) {
+      testStatus.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = 'Test Connection';
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+    saveStatus.textContent = '';
+    try {
+      await api(`/api/accounts/${accountId}/sheets`, {
+        method: 'POST',
+        body: {
+          sheetUrl:  statusDiv.querySelector('.acct-sheet-url').value,
+          tabMode:   tabModeSelect.value,
+          manualTab: statusDiv.querySelector('.acct-sheet-manual-tab').value,
+        },
+      });
+      toast('Sheet config saved', 'success');
+      loadAccountSheetStatus(accountId, statusDiv);
+    } catch (err) {
+      saveStatus.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+      toast(err.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
 }
 
 function showAgentOutput(panelId, text) {
@@ -1645,8 +1676,10 @@ function wireAgentButtons() {
 
   // WRITER
   $('#writer-run-btn').addEventListener('click', async () => {
-    const username = $('#writer-username').value;
+    const writerSel = $('#writer-username');
+    const username = writerSel.value;
     if (!username) return toast('Select a profile first', 'error');
+    const accountId = writerSel.options[writerSel.selectedIndex]?.dataset?.accountId || null;
     const btn = $('#writer-run-btn');
     const contentGoal = $('#writer-goal').value.trim() || null;
     btn.disabled = true;
@@ -1656,8 +1689,7 @@ function wireAgentButtons() {
       const result = await api('/api/agents/writer', { method: 'POST', body: { username, contentGoal } });
       setAgentStatus('writer', 'done');
       showAgentOutput('writer-output', result.reviewed);
-      // Add export button
-      addSheetsExportButton('writer-output', result.id, username);
+      addSheetsExportButton('writer-output', result.id, username, accountId);
       toast('Captions ready', 'success');
       loadAgentHistory();
     } catch (err) {
@@ -1763,9 +1795,11 @@ function wireAgentButtons() {
   });
 
   $('#bulk-generate-btn').addEventListener('click', async () => {
-    const username = $('#bulk-username').value;
+    const bulkSel = $('#bulk-username');
+    const username = bulkSel.value;
     if (!username) return toast('Select a creator profile first', 'error');
     if (!_bulkFiles.length) return toast('Add at least one .MOV video first', 'error');
+    const accountId = bulkSel.options[bulkSel.selectedIndex]?.dataset?.accountId || null;
     const btn = $('#bulk-generate-btn');
     btn.disabled = true;
     setAgentStatus('bulk', 'running');
@@ -1783,8 +1817,7 @@ function wireAgentButtons() {
       _bulkResults = result.results;
       setAgentStatus('bulk', 'done');
       renderBulkCaptionResults(result.results);
-      // Add export button below bulk results
-      addSheetsExportButton('bulk-caption-results', result.id, username);
+      addSheetsExportButton('bulk-caption-results', result.id, username, accountId);
       toast(`${result.videoCount} video${result.videoCount !== 1 ? 's' : ''} processed — captions ready`, 'success');
       loadAgentHistory();
     } catch (err) {
@@ -1795,6 +1828,10 @@ function wireAgentButtons() {
       btn.textContent = 'Generate Captions';
     }
   });
+
+  // Per-account sheet status panels
+  wireAccountSheetPanel('writer-username', 'writer-sheet-status');
+  wireAccountSheetPanel('bulk-username', 'bulk-sheet-status');
 
   // ── THE IDEATOR V2 ───────────────────────────────────────────────────────────
   $('#ideator-v2-run-btn').addEventListener('click', async () => {

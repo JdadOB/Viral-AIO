@@ -40,6 +40,41 @@ module.exports = function mountSheetsRoutes(app, { requireAuth, requireManager, 
     res.json({ success: true, sheetId });
   });
 
+  // ── Per-account sheet config ─────────────────────────────────────────────────
+  // GET /api/accounts/:id/sheets
+  app.get('/api/accounts/:id/sheets', requireAuth, (req, res) => {
+    const uid = req.scopedUserId;
+    const account = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(parseInt(req.params.id), uid);
+    if (!account) return res.status(404).json({ error: 'Not found' });
+    const colMap = (() => { try { return JSON.parse(account.sheets_col_map || 'null'); } catch { return null; } })();
+    res.json({
+      sheetId:   account.sheets_sheet_id   || '',
+      tabMode:   account.sheets_tab_mode   || 'date',
+      manualTab: account.sheets_manual_tab || '',
+      colMap,
+    });
+  });
+
+  // POST /api/accounts/:id/sheets
+  // Body: { sheetUrl, tabMode, manualTab, colMap }
+  app.post('/api/accounts/:id/sheets', requireManager, (req, res) => {
+    const uid = req.scopedUserId;
+    const account = db.prepare('SELECT id FROM accounts WHERE id = ? AND user_id = ?').get(parseInt(req.params.id), uid);
+    if (!account) return res.status(404).json({ error: 'Not found' });
+
+    const { sheetUrl, tabMode, manualTab, colMap } = req.body;
+    if (!sheetUrl) return res.status(400).json({ error: 'sheetUrl required' });
+
+    const sheetId = extractSheetId(sheetUrl);
+    if (!sheetId) return res.status(400).json({ error: 'Could not extract Sheet ID from URL. Paste the full Google Sheets URL.' });
+
+    db.prepare(`UPDATE accounts SET sheets_sheet_id = ?, sheets_tab_mode = ?, sheets_manual_tab = ?, sheets_col_map = ? WHERE id = ?`)
+      .run(sheetId, tabMode || 'date', manualTab || null, colMap ? JSON.stringify(colMap) : null, account.id);
+
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'account_sheets_config_saved', { aaccountId: account.id, sheetId });
+    res.json({ success: true, sheetId });
+  });
+
   // ── Validate/test sheet connection ───────────────────────────────────────────
   // POST /api/sheets/validate
   // Body: { sheetUrl }
@@ -87,21 +122,33 @@ module.exports = function mountSheetsRoutes(app, { requireAuth, requireManager, 
   // }
   app.post('/api/sheets/export', requireManager, async (req, res) => {
     const uid = req.scopedUserId;
-    const { captions, date, tabName } = req.body;
+    const { captions, date, tabName, accountId } = req.body;
 
     if (!Array.isArray(captions) || !captions.length) {
       return res.status(400).json({ error: 'captions[] array required' });
     }
 
-    const sheetId = getUserSetting(uid, 'sheets_sheet_id');
-    if (!sheetId) {
-      return res.status(400).json({ error: 'No Google Sheet configured. Go to Settings → Google Sheets to set up.' });
+    // Resolve sheet config: per-account if accountId provided, else fall back to user setting
+    let sheetId, tabMode, manualTab, colMap;
+    if (accountId) {
+      const acct = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(parseInt(accountId), uid);
+      if (acct && acct.sheets_sheet_id) {
+        sheetId   = acct.sheets_sheet_id;
+        tabMode   = acct.sheets_tab_mode   || 'date';
+        manualTab = acct.sheets_manual_tab || '';
+        colMap    = acct.sheets_col_map ? (() => { try { return JSON.parse(acct.sheets_col_map); } catch { return null; } })() : null;
+      }
     }
-
-    const tabMode    = getUserSetting(uid, 'sheets_tab_mode') || 'date';
-    const manualTab  = getUserSetting(uid, 'sheets_manual_tab') || '';
-    const colMapRaw  = getUserSetting(uid, 'sheets_col_map');
-    const colMap     = colMapRaw ? (() => { try { return JSON.parse(colMapRaw); } catch { return null; } })() : null;
+    if (!sheetId) {
+      sheetId   = getUserSetting(uid, 'sheets_sheet_id');
+      tabMode   = getUserSetting(uid, 'sheets_tab_mode') || 'date';
+      manualTab = getUserSetting(uid, 'sheets_manual_tab') || '';
+      const colMapRaw = getUserSetting(uid, 'sheets_col_map');
+      colMap = colMapRaw ? (() => { try { return JSON.parse(colMapRaw); } catch { return null; } })() : null;
+    }
+    if (!sheetId) {
+      return res.status(400).json({ error: 'No Google Sheet configured. Set up a sheet for this account first.' });
+    }
 
     // Resolve tab name
     const resolvedTab = tabName
@@ -144,14 +191,9 @@ module.exports = function mountSheetsRoutes(app, { requireAuth, requireManager, 
   // Pulls a saved agent_output by ID, parses the captions out, exports to sheet
   app.post('/api/sheets/export-output', requireManager, async (req, res) => {
     const uid = req.scopedUserId;
-    const { outputId, date, tabName } = req.body;
+    const { outputId, date, tabName, accountId } = req.body;
 
     if (!outputId) return res.status(400).json({ error: 'outputId required' });
-
-    const sheetId = getUserSetting(uid, 'sheets_sheet_id');
-    if (!sheetId) {
-      return res.status(400).json({ error: 'No Google Sheet configured. Go to Settings → Google Sheets to set up.' });
-    }
 
     // Load the saved output
     const output = db.prepare('SELECT * FROM agent_outputs WHERE id = ? AND user_id = ?').get(outputId, uid);
@@ -165,10 +207,27 @@ module.exports = function mountSheetsRoutes(app, { requireAuth, requireManager, 
       return res.status(400).json({ error: 'No captions could be parsed from this output' });
     }
 
-    const tabMode   = getUserSetting(uid, 'sheets_tab_mode') || 'date';
-    const manualTab = getUserSetting(uid, 'sheets_manual_tab') || '';
-    const colMapRaw = getUserSetting(uid, 'sheets_col_map');
-    const colMap    = colMapRaw ? (() => { try { return JSON.parse(colMapRaw); } catch { return null; } })() : null;
+    // Resolve sheet config: per-account if accountId provided, else fall back to user setting
+    let sheetId, tabMode, manualTab, colMap;
+    if (accountId) {
+      const acct = db.prepare('SELECT * FROM accounts WHERE id = ? AND user_id = ?').get(parseInt(accountId), uid);
+      if (acct && acct.sheets_sheet_id) {
+        sheetId   = acct.sheets_sheet_id;
+        tabMode   = acct.sheets_tab_mode   || 'date';
+        manualTab = acct.sheets_manual_tab || '';
+        colMap    = acct.sheets_col_map ? (() => { try { return JSON.parse(acct.sheets_col_map); } catch { return null; } })() : null;
+      }
+    }
+    if (!sheetId) {
+      sheetId   = getUserSetting(uid, 'sheets_sheet_id');
+      tabMode   = getUserSetting(uid, 'sheets_tab_mode') || 'date';
+      manualTab = getUserSetting(uid, 'sheets_manual_tab') || '';
+      const colMapRaw = getUserSetting(uid, 'sheets_col_map');
+      colMap = colMapRaw ? (() => { try { return JSON.parse(colMapRaw); } catch { return null; } })() : null;
+    }
+    if (!sheetId) {
+      return res.status(400).json({ error: 'No Google Sheet configured. Set up a sheet for this account first.' });
+    }
 
     const resolvedTab = tabName
       || (tabMode === 'manual' ? manualTab : null)
@@ -250,3 +309,4 @@ function parseCaptionsFromOutput(text, agent) {
 
   return captions;
 }
+
