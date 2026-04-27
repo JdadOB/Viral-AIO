@@ -1,3 +1,5 @@
+const APP_VERSION = '0.50';
+
 // ── Utilities ────────────────────────────────────────────────────────────────
 
 function proxyImg(url) {
@@ -2959,6 +2961,9 @@ const initPage = window.location.hash.replace('#', '') || 'dashboard';
 navigate(initPage);
 updateStats();
 setInterval(updateStats, 30000);
+
+const versionEl = document.getElementById('app-version');
+if (versionEl) versionEl.textContent = `v${APP_VERSION}`;
 
 // ── Operator Info + RBAC bootstrap ───────────────────────────────────────────
 let currentUser = null;
