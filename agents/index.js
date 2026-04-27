@@ -52,17 +52,39 @@ function extractEmojiStats(posts) {
   return { topEmojis, usageStyle, avgPerPost: avg.toFixed(1), totalUsed: total, uniqueCount: entries.length, rawCounts: allCounts };
 }
 
-function formatEmojiBlock(emojiStats) {
-  if (!emojiStats || emojiStats.totalUsed === 0) {
+// formatEmojiBlock handles two input shapes:
+//   DB format   — Claude-generated: { signature, mustUse[], avoidList[], placementStyle, usageStyle }
+//   Stats format — extractEmojiStats: { topEmojis[], totalUsed, avgPerPost, usageStyle }
+// Returns '' when data is absent so callers never accidentally suppress emojis.
+function formatEmojiBlock(emojiData) {
+  if (!emojiData) return ''; // No profile yet — don't constrain the model
+
+  // ── DB / Claude-generated format ─────────────────────────────────────────────
+  if (Array.isArray(emojiData.mustUse) || emojiData.signature !== undefined) {
+    const mustUse   = (emojiData.mustUse   || []).join(' ') || '—';
+    const avoidList = (emojiData.avoidList || []).join(' ') || 'none specified';
+    const noEmoji   = mustUse === '—' && !emojiData.signature;
+    if (noEmoji) return '\nEMOJI RULE: This creator writes in plain text — use NO emojis.';
+    return `
+EMOJI FINGERPRINT — replicate exactly, do NOT use emojis outside this set:
+• Signature: ${emojiData.signature || '—'}
+• Must use (high-ER emojis): ${mustUse}
+• Avoid (not in their repertoire): ${avoidList}
+• Placement: ${emojiData.placementStyle || '—'}
+• Usage style: ${emojiData.usageStyle || '—'}`;
+  }
+
+  // ── Raw extractEmojiStats format (used inside runProfileBuilder prompt only) ─
+  if (emojiData.totalUsed === 0) {
     return '\nEMOJI RULE: This creator writes in plain text — use NO emojis.';
   }
-  const top      = emojiStats.topEmojis || [];
+  const top      = emojiData.topEmojis || [];
   const highPerf = top.filter(e => e.pctHighEr >= 60).map(e => e.emoji).join(' ') || '—';
   const regular  = top.filter(e => e.pctHighEr < 60 && e.count >= 2).map(e => e.emoji).join(' ') || '—';
   const full     = top.slice(0, 12).map(e => e.emoji).join(' ') || '—';
   return `
 EMOJI FINGERPRINT — replicate exactly, do NOT use emojis outside this set:
-• Usage style: ${emojiStats.usageStyle} (avg ${emojiStats.avgPerPost}/post)
+• Usage style: ${emojiData.usageStyle} (avg ${emojiData.avgPerPost}/post)
 • High-ER emojis (in best-performing posts): ${highPerf}
 • Regular emojis: ${regular}
 • Full signature set: ${full}`;
