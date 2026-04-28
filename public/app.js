@@ -2870,16 +2870,17 @@ async function loadWaitlist() {
     const container = document.getElementById('admin-waitlist');
     if (!container) return;
     if (!entries.length) { container.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">No waitlist submissions yet.</p>'; return; }
-    const emails = entries.map(e => e.email).join(', ');
-    container.innerHTML = "
+    const rows = entries.map(e => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg-3);border-radius:8px;font-size:13px"><span>${e.email}</span><span style="color:var(--text-dim);font-size:11px">${new Date(e.submittedAt).toLocaleString()}</span></div>`).join('');
+    container.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-sub)">\ submission\</span>
-        <button class="btn" style="font-size:12px;padding:4px 12px" onclick="navigator.clipboard.writeText('\').then(() => toast('Emails copied', 'success'))">Copy All Emails</button>
+        <span style="font-size:13px;color:var(--text-sub)">${entries.length} submission${entries.length !== 1 ? 's' : ''}</span>
+        <button class="btn" id="waitlist-copy-btn" style="font-size:12px;padding:4px 12px">Copy All Emails</button>
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        \
-      </div>
-    ";
+      <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+    `;
+    document.getElementById('waitlist-copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(entries.map(e => e.email).join('\n')).then(() => toast('Emails copied', 'success'));
+    });
   } catch (err) {
     console.error('Waitlist load error:', err);
   }
