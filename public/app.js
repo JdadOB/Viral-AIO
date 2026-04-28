@@ -1506,8 +1506,10 @@ function wireAgentButtons() {
     btn.disabled = true;
     try {
       const result = await api('/api/agents/ideator', { method: 'POST', body: { group } });
-      showAgentOutput('ideator-output', result.reviewed || result.raw);
-      addSheetsExportButton('ideator-output', result.id, null, null);
+      const isClient = currentUser?.role === 'client';
+      const ideatorText = (isClient && result.clientOutput) ? result.clientOutput : (result.reviewed || result.raw);
+      showAgentOutput('ideator-output', ideatorText);
+      if (!isClient) addSheetsExportButton('ideator-output', result.id, null, null);
       loadAgentHistory();
     } catch (err) { toast(err.message, 'error'); }
     finally { setAgentStatus('ideator', 'idle'); btn.disabled = false; }
@@ -1524,7 +1526,12 @@ function wireAgentButtons() {
     try {
       const result = await api('/api/agents/ideator-v2', { method: 'POST', body: { username } });
       const out = $('#ideator-v2-output');
-      if (out) { out.style.display = 'block'; out.innerHTML = renderMarkdown(result.reviewed || result.raw || ''); }
+      if (out) {
+        const isClient = currentUser?.role === 'client';
+        const ideatorV2Text = (isClient && result.clientOutput) ? result.clientOutput : (result.reviewed || result.raw || '');
+        out.style.display = 'block';
+        out.innerHTML = renderMarkdown(ideatorV2Text);
+      }
       loadAgentHistory();
     } catch (err) { toast(err.message, 'error'); }
     finally { if (statusEl) statusEl.className = 'agent-status idle'; btn.disabled = false; }
@@ -1671,10 +1678,12 @@ function loadAgentHistory() {
         api(`/api/agents/history?agent=${agent}`).then(rows => {
           const row = rows.find(r => String(r.id) === id);
           if (!row) return;
+          const isClient = currentUser?.role === 'client';
+          const historyOutput = (isClient && row.client_output) ? row.client_output : (row.reviewed_output || row.raw_output);
           showOutputModal(
             `${agent} — Output #${row.id}`,
-            row.reviewed_output || row.raw_output,
-            row.captain_notes
+            historyOutput,
+            isClient ? null : row.captain_notes
           );
         });
       });

@@ -128,12 +128,38 @@ function getCreatorProfile(accountId) {
   return db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(accountId);
 }
 
-function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, captainNotes = null, userId = null) {
+function saveOutput(agent, inputSummary, rawOutput, reviewedOutput = null, captainNotes = null, userId = null, clientOutput = null) {
   const { lastInsertRowid } = db.prepare(`
-    INSERT INTO agent_outputs (agent, input_summary, raw_output, reviewed_output, captain_notes, user_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(agent, inputSummary, rawOutput, reviewedOutput, captainNotes, userId);
+    INSERT INTO agent_outputs (agent, input_summary, raw_output, reviewed_output, captain_notes, user_id, client_output)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(agent, inputSummary, rawOutput, reviewedOutput, captainNotes, userId, clientOutput);
   return lastInsertRowid;
+}
+
+async function simplifyForClient(fullOutput, context = '') {
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 1200,
+    system: `You rewrite content strategy documents into plain, friendly summaries that a busy creator can read in 60 seconds. No marketing jargon. No analytics terms. No "engagement rate", "CTR", "multipliers", or agency language. Write like you're texting a friend who makes videos — warm, clear, and practical. Focus only on WHAT to film and HOW to start.`,
+    messages: [{
+      role: 'user',
+      content: `Rewrite the following video ideas as a simple, friendly summary for the creator themselves.
+
+Keep it short (max 300 words). For each idea:
+- Give it a casual, plain-English title (no ALL CAPS)
+- One sentence on what to film
+- One sentence on how to start (the opening line or first shot)
+- Skip all data references, percentages, and strategy reasoning
+
+End with one sentence on which idea to film first and why (in plain English — "your audience loves this kind of content" not "your ER data indicates").
+
+${context ? `Context: ${context}\n` : ''}
+FULL STRATEGY OUTPUT:
+${fullOutput}`,
+    }],
+  });
+  return msg.content[0].text.trim();
 }
 
 // ── CAPTAIN ───────────────────────────────────────────────────────────────────
@@ -633,9 +659,10 @@ The top 3 ideas to execute first, ranked by expected impact, and why.
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Ideator', rawOutput, `Reel ideas for group: "${group || 'All'}", ${accountQuery.length} creators, ${viral.length} viral posts analyzed`);
-  const id = saveOutput('ideator', `Reel ideas: ${group || 'All creators'}`, rawOutput, captain.reviewed, captain.notes, userId);
+  const clientOutput = await simplifyForClient(captain.reviewed, `Creator group: ${group || 'All creators'}, ${accountQuery.length} accounts`);
+  const id = saveOutput('ideator', `Reel ideas: ${group || 'All creators'}`, rawOutput, captain.reviewed, captain.notes, userId, clientOutput);
 
-  return { id, group, accountCount: accountQuery.length, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
+  return { id, group, accountCount: accountQuery.length, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes, clientOutput };
 }
 
 // ── BULK CAPTION GENERATOR ────────────────────────────────────────────────────
@@ -856,9 +883,10 @@ One paragraph explaining why this specific mix fits @${username}'s audience, nic
 
   const rawOutput = msg.content[0].text;
   const captain = await runCaptain('Ideator', rawOutput, `Constraint-based reel ideas for @${username}, ${(account.followers_count || 0).toLocaleString()} followers`);
-  const id = saveOutput('ideator', `Ideator: constraint-based ideas for @${username}`, rawOutput, captain.reviewed, captain.notes, userId);
+  const clientOutput = await simplifyForClient(captain.reviewed, `Creator: @${username}, ${(account.followers_count || 0).toLocaleString()} followers`);
+  const id = saveOutput('ideator', `Ideator: constraint-based ideas for @${username}`, rawOutput, captain.reviewed, captain.notes, userId, clientOutput);
 
-  return { id, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
+  return { id, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes, clientOutput };
 }
 
 // ── REFRESH SINGLE CAPTION ──────────────────────────────────────────────────
