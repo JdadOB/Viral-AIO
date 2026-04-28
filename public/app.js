@@ -2815,6 +2815,15 @@ async function renderAdmin() {
         <div id="admin-user-list">Loading...</div>
       </div>
 
+      <!-- Subscribers -->
+      <div class="settings-card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em">Subscribers</div>
+          <button class="btn" style="font-size:12px;padding:4px 12px" onclick="loadSubscribers()">Refresh</button>
+        </div>
+        <div id="admin-subscribers">Loading...</div>
+      </div>
+
       <!-- Outreach Engine -->
       <div class="settings-card" style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -2874,6 +2883,7 @@ async function renderAdmin() {
   loadAdminUsers();
   loadActivityLog();
   loadWaitlist();
+  loadSubscribers();
 
   document.getElementById('outreach-scan-btn').addEventListener('click', async () => {
     const btn = document.getElementById('outreach-scan-btn');
@@ -2943,6 +2953,22 @@ function renderOutreachProspects(prospects) {
     card.append(topRow, draftBox);
     container.appendChild(card);
   });
+}
+
+async function loadSubscribers() {
+  try {
+    const rows = await api('/api/admin/subscribers');
+    const el = document.getElementById('admin-subscribers');
+    if (!el) return;
+    if (!rows.length) { el.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">No paying subscribers yet.</p>'; return; }
+    const planColors = { solo: 'var(--green)', small_agency: 'var(--cyan)', unlimited: 'var(--magenta)' };
+    el.innerHTML = '<div style="font-size:13px;color:var(--text-sub);margin-bottom:10px">' + rows.length + ' subscriber' + (rows.length !== 1 ? 's' : '') + '</div>' +
+      rows.map(r => '<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px;font-size:13px">'+
+        '<div style="flex:1"><div style="font-weight:600">' + escapeHtml(r.name || r.email) + '</div><div style="font-size:11px;color:var(--text-dim)">' + escapeHtml(r.email) + '</div></div>'+
+        '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(99,102,241,0.12);color:' + (planColors[r.plan] || 'var(--accent2)') + '">'+escapeHtml(r.plan||'unknown').replace('_',' ').toUpperCase()+'</span>'+
+        '<span style="font-size:11px;color:' + (r.status==='active'?'var(--green)':'var(--red)') + '">' + escapeHtml(r.status||'') + '</span>'+
+      '</div>').join('');
+  } catch(e) { console.error('Subscribers load error:', e); }
 }
 
 async function loadWaitlist() {

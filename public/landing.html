@@ -636,7 +636,7 @@
           <li>Priority support</li>
           <li class="no">Unlimited creators</li>
         </ul>
-        <a href="/login" class="price-cta primary">Get Started</a>
+        <button class="price-cta primary" onclick="startCheckout('small_agency')">Get Started</button>
       </div>
 
       <div class="price-card">
@@ -858,5 +858,21 @@
   }
 </script>
 
+<script>
+async function startCheckout(plan) {
+  try {
+    const res = await fetch("/api/stripe/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan })
+    });
+    const data = await res.json();
+    if (data.url) window.location.href = data.url;
+    else alert("Error: " + (data.error || "Unknown error"));
+  } catch(e) {
+    alert("Something went wrong. Please try again.");
+  }
+}
+</script>
 </body>
 </html>

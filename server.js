@@ -340,6 +340,9 @@ app.post('/api/admin/outreach/reddit', requireAdmin, async (req, res) => {
   }
 });
 
+// Payment success page
+app.get('/payment-success', (req, res) => res.sendFile(require('path').join(__dirname, 'public', 'payment-success.html')));
+
 // Legal pages
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));
@@ -1138,6 +1141,7 @@ app.delete('/api/content/:id', requireManager, (req, res) => {
 // ── Google Sheets Integration ───────────────────────────────────────────────
 try {
   require('./sheets-routes')(app, { requireAuth, requireManager, db, getUserSetting, setUserSetting, userRole, logActivity });
+require('./stripe-routes')(app, { db, requireAuth, requireAdmin, logActivity, userRole });
   console.log('[Sheets] Google Sheets routes mounted');
 } catch (e) {
   console.warn('[Sheets] Routes not loaded:', e.message);
