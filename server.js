@@ -66,6 +66,7 @@ const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler 
 const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption, refreshBulkSingleCaption } = require('./agents');
 
 const app = express();
+app.set('trust proxy', 1); // Fly.io (and most PaaS) terminate TLS at the edge; trust X-Forwarded-Proto
 const SESSION_SECRET = (() => {
   const s = process.env.SESSION_SECRET;
   if (!s || s.length < 32) {

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://mcp.github.com",
+      "headers": {
+        "Authorization": "Bearer $GITHUB_TOKEN"
+      },
+      "allowedEnvVars": ["GITHUB_TOKEN"]
+    }
+  }
+}
