@@ -328,6 +328,18 @@ app.get('/api/admin/waitlist', requireAdmin, (req, res) => {
   }
 });
 
+// Outreach engine
+const { scanReddit } = require('./reddit-module');
+app.post('/api/admin/outreach/reddit', requireAdmin, async (req, res) => {
+  try {
+    const prospects = await scanReddit();
+    res.json(prospects);
+  } catch (err) {
+    console.error('[Outreach:Reddit]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Legal pages
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));

@@ -2815,6 +2815,18 @@ async function renderAdmin() {
         <div id="admin-user-list">Loading...</div>
       </div>
 
+      <!-- Outreach Engine -->
+      <div class="settings-card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em">Reddit Outreach</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Find prospects &amp; draft replies automatically</div>
+          </div>
+          <button class="btn btn-accent" id="outreach-scan-btn" style="font-size:12px;padding:6px 14px">&#128269; Scan Reddit</button>
+        </div>
+        <div id="outreach-results"><p style="font-size:13px;color:var(--text-dim)">Click Scan to find today's prospects.</p></div>
+      </div>
+
       <!-- Waitlist -->
       <div class="settings-card" style="margin-bottom:16px">
         <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:14px">Access Requests (Waitlist)</div>
@@ -2862,6 +2874,75 @@ async function renderAdmin() {
   loadAdminUsers();
   loadActivityLog();
   loadWaitlist();
+
+  document.getElementById('outreach-scan-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('outreach-scan-btn');
+    const results = document.getElementById('outreach-results');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Scanning...'
+    results.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">Scanning Reddit and drafting replies... this takes ~30 seconds.</p>';
+    try {
+      const prospects = await api('/api/admin/outreach/reddit', { method: 'POST' });
+      renderOutreachProspects(prospects);
+    } catch (err) {
+      results.innerHTML = '<p style="font-size:13px;color:var(--red)">' + escapeHtml(err.message) + '</p>';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '&#128269; Scan Reddit';
+    }
+  });
+}
+
+function renderOutreachProspects(prospects) {
+  const container = document.getElementById('outreach-results');
+  if (!prospects || !prospects.length) {
+    container.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">No prospects found. Try again later.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  const header = document.createElement('div');
+  header.style.cssText = 'font-size:13px;color:var(--text-sub);margin-bottom:12px';
+  header.textContent = prospects.length + ' prospects found — click \u201cOpen & Copy\u201d to post the reply on Reddit';
+  container.appendChild(header);
+
+  prospects.forEach((p, i) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px';
+
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px';
+
+    const info = document.createElement('div');
+    info.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:3px">' + escapeHtml(p.title.substring(0, 90)) + (p.title.length > 90 ? '...' : '') + '</div>' +
+      '<div style="font-size:11px;color:var(--text-dim)">r/' + escapeHtml(p.subreddit) + ' \u00b7 Score: ' + p.score + ' \u00b7 ' + (p.comments || 0) + ' comments</div>';
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-accent';
+    openBtn.style.cssText = 'font-size:12px;padding:5px 12px;white-space:nowrap;flex-shrink:0';
+    openBtn.textContent = 'Open & Copy Reply';
+    openBtn.addEventListener('click', () => {
+      window.open(p.url, '_blank');
+      navigator.clipboard.writeText(p.draft || '').then(() => {
+        openBtn.textContent = '\u2713 Copied!';
+        openBtn.style.borderColor = 'var(--green)';
+        openBtn.style.color = 'var(--green)';
+        setTimeout(() => { openBtn.textContent = 'Open & Copy Reply'; openBtn.style.borderColor = ''; openBtn.style.color = ''; }, 3000);
+      });
+    });
+
+    topRow.append(info, openBtn);
+
+    const draftBox = document.createElement('div');
+    draftBox.style.cssText = 'font-size:12px;color:var(--text-sub);background:var(--bg-3);border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.6;max-height:120px;overflow:hidden;position:relative;cursor:pointer';
+    draftBox.textContent = p.draft || '(no draft)';
+    draftBox.title = 'Click to expand';
+    draftBox.addEventListener('click', () => {
+      draftBox.style.maxHeight = draftBox.style.maxHeight === 'none' ? '120px' : 'none';
+    });
+
+    card.append(topRow, draftBox);
+    container.appendChild(card);
+  });
 }
 
 async function loadWaitlist() {
