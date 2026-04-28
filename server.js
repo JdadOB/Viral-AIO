@@ -300,6 +300,19 @@ app.get('/api/admin/logs', requireAdmin, (req, res) => {
 });
 
 // Main app — auth required
+// Waitlist email capture
+app.post('/api/waitlist', (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email required' });
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('waitlist_' + Date.now() + '_' + Math.random().toString(36).slice(2), email);
+    console.log('[Waitlist]', email);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Public landing page
 app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'landing.html'));
