@@ -61,7 +61,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2 } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -658,6 +658,52 @@ app.post('/api/agents/writer', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[Agent:Writer]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Caption refresh (single card) ─────────────────────────────────────────
+app.post('/api/agents/writer/refresh-caption', requireAuth, async (req, res) => {
+  try {
+    const { username, contentGoal } = req.body;
+    if (!username) return res.status(400).json({ error: 'username required' });
+    const caption = await refreshSingleCaption({ username, contentGoal, userId: req.scopedUserId });
+    res.json({ caption });
+  } catch (err) {
+    console.error('[Agent:Writer:Refresh]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Caption rating ─────────────────────────────────────────────────────────
+app.post('/api/captions/rate', requireAuth, (req, res) => {
+  try {
+    const { outputId, captionIndex, rating } = req.body;
+    if (!outputId || captionIndex === undefined || !rating) {
+      return res.status(400).json({ error: 'outputId, captionIndex, rating required' });
+    }
+    db.prepare(
+      'INSERT OR REPLACE INTO caption_ratings (output_id, caption_index, rating) VALUES (?, ?, ?)'
+    ).run(outputId, captionIndex, rating);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Captions:Rate]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Caption history per creator ─────────────────────────────────────────────
+app.get('/api/captions/history/:username', requireAuth, (req, res) => {
+  try {
+    const { username } = req.params;
+    const rows = db.prepare(
+      `SELECT id, input_summary, reviewed_output, created_at FROM agent_outputs
+       WHERE user_id = ? AND agent = 'writer' AND input_summary LIKE ?
+       ORDER BY created_at DESC LIMIT 50`
+    ).all(req.scopedUserId, `%@${username}%`);
+    res.json(rows);
+  } catch (err) {
+    console.error('[Captions:History]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -278,6 +278,18 @@ try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_col_map TEXT'); } catch (e
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
 
+// ── Caption ratings ─────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS caption_ratings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    output_id INTEGER NOT NULL,
+    caption_index INTEGER NOT NULL,
+    rating TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(output_id, caption_index)
+  );
+`);
+
 // Keep legacy global settings for backward compat
 const defaults = {
   polling_interval_minutes:   '60',

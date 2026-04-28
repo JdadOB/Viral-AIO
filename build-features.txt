@@ -1,0 +1,102 @@
+Build the following features for the Viral-AIO app. This is a Node.js/Express backend with vanilla JS frontend (public/app.js). Study the existing code style carefully before making changes.
+
+---
+
+## FEATURE 1: Individual Caption Refresh
+
+### Backend (server.js + agents/index.js)
+Add a new route: POST /api/agents/bulk-captions/refresh
+Body: { username, videoName, videoSize, keyframes: [...base64 jpgs], existingCaptions: [{style, text, hashtags}] }
+
+In agents/index.js, add a new exported function runRefreshCaption({ username, videoName, videoSize, keyframes, existingCaptions, userId }) that:
+- Loads the same Brain profile context as runBulkCaptions
+- Sends a prompt: "Generate 3 NEW captions for this video — different styles and angles from the existing ones. Existing captions to avoid repeating: [list them]. Use the creator's exact voice."
+- Returns { captions: [{style, text, hashtags}] } (same shape as a single video's captions in runBulkCaptions)
+
+Mount the route in server.js alongside the existing bulk-captions route.
+
+### Frontend (public/app.js)
+In renderBulkCaptionResults(), add a Refresh button (use text "Refresh" or a refresh icon) to each caption-card (next to the Copy button).
+
+When clicked:
+- Show a spinner on that card
+- Call POST /api/agents/bulk-captions/refresh with the video data (pulled from _bulkFiles[vi] for keyframes/size, _bulkResults[vi].videoName for name, plus the current 3 captions as existingCaptions)
+- On success: replace just that video group's captions in _bulkResults[vi].captions and re-render only that video group's caption-cards-row
+- On error: call toast(err.message, 'error')
+
+---
+
+## FEATURE 2: Dropbox Link + Inline Caption Editing
+
+### Frontend only
+In renderBulkCaptionResults(), update each caption-card to include:
+- A contenteditable div for the caption text (instead of a static div) so the user can tweak inline before exporting
+- A small text input below the hashtags for a Dropbox link (placeholder "Dropbox link...")
+- On input/blur events, update _bulkResults[vi].captions[ci].text, .hashtags, and .dropboxLink so the export picks up edits
+
+Update the export button logic: when _bulkResults has data, build a flat captions[] array from _bulkResults (including edits and dropboxLink) and POST directly to /api/sheets/export (not /api/sheets/export-output), passing accountId if available.
+
+---
+
+## FEATURE 3: Caption Rating
+
+### Backend
+Add a migration in db.js (use same try/catch pattern as existing migrations):
+CREATE TABLE IF NOT EXISTS caption_ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  account_id INTEGER,
+  caption_text TEXT NOT NULL,
+  hashtags TEXT,
+  rating INTEGER NOT NULL,
+  video_name TEXT,
+  style TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+Add route in server.js: POST /api/captions/rate
+Body: { accountId, captionText, hashtags, videoName, style, rating }
+Requires requireAuth middleware. Saves to caption_ratings. Returns { success: true }.
+
+### Frontend
+Add thumbs up / thumbs down buttons to each caption card (small, after the platform badge).
+On click: POST /api/captions/rate with the caption data + accountId from the bulk-username select's data-account-id attribute.
+Show brief visual confirmation (button turns green for up, red for down).
+
+---
+
+## FEATURE 4: Platform Selector Per Caption
+
+### Frontend only
+Add a small platform toggle on each caption card showing: IG / TikTok / OF
+Default to IG. Clicking a label makes it active (accent color). Store selection in _bulkResults[vi].captions[ci].platform.
+Include platform in the captions array sent to the sheet export.
+
+---
+
+## FEATURE 5: Caption History Per Creator
+
+### Backend
+Add route in server.js: GET /api/captions/history?username=xxx&limit=50
+Requires requireAuth. Queries agent_outputs WHERE input_summary LIKE the username pattern AND agent IN ('writer','bulk-captions') ORDER BY created_at DESC LIMIT 50.
+Returns array of { id, agent, input_summary, created_at }.
+
+### Frontend
+After the bulk-username select (inside the agent-card body, before the Upload Videos label), add a collapsible "Caption History" div.
+When a creator is selected from the dropdown, fetch GET /api/captions/history?username=xxx and populate the list.
+Show: date, agent type, input_summary. Clicking a row calls the existing showOutputModal after fetching the full output from GET /api/agents/history?agent=xxx filtered to that id.
+Keep it collapsed by default with a toggle link.
+
+---
+
+## Code style rules:
+- Vanilla JS only, no frameworks
+- Match existing patterns: toast(), api(), $$(), $(), escapeHtml(), renderMarkdown()
+- Use existing CSS class conventions (caption-card, agent-input, btn, btn-accent, etc.)
+- Keep _bulkResults as source of truth for caption state
+- All backend routes use requireAuth or requireManager middleware matching existing patterns
+- db.js migrations use the existing try/catch duplicate-column-check pattern
+- Export the new runRefreshCaption from agents/index.js and destructure it in server.js
+
+When completely finished, run:
+openclaw system event --text "Done: Caption refresh, editing, rating, platform selector, history built" --mode now

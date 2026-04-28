@@ -861,4 +861,51 @@ One paragraph explaining why this specific mix fits @${username}'s audience, nic
   return { id, username, raw: rawOutput, reviewed: captain.reviewed, captainNotes: captain.notes };
 }
 
-module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2 };
+// ── REFRESH SINGLE CAPTION ──────────────────────────────────────────────────
+async function refreshSingleCaption({ username, contentGoal = null, userId }) {
+  const account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(username, userId);
+  if (!account) throw new Error(`@${username} is not in the database`);
+
+  const captions = getProfileCaptions(username, 10);
+  const captionExamples = captions.length
+    ? captions.map(c => `[ER: ${(c.engagement_rate || 0).toFixed(2)}%]\n${c.caption}`).join('\n\n---\n\n')
+    : 'No caption history available yet.';
+
+  const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+  const emojiData = profile?.emoji_fingerprint ? (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })() : null;
+  const profileBlock = profile ? `
+CREATOR INTELLIGENCE PROFILE:
+• Voice: ${profile.voice_fingerprint}
+• Content Pillars: ${profile.content_pillars}
+• Audience Triggers: ${profile.audience_triggers}
+${formatEmojiBlock(emojiData)}` : '';
+
+  const ai = client();
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 800,
+    system: `You are the Writer — a caption specialist who writes in a creator's authentic voice. Write ONE single caption variation only.`,
+    messages: [{
+      role: 'user',
+      content: `Write 1 NEW Instagram caption for @${username}. Use a COMPLETELY DIFFERENT hook style, angle, and tone than you might have used before — surprise me.
+
+PROFILE:
+• Username: @${username}${account.full_name ? ` / ${account.full_name}` : ''}
+• Avg ER: ${(account.avg_engagement_rate || 0).toFixed(2)}%
+${profileBlock}
+THEIR BEST CAPTIONS (study the voice):
+${captionExamples}
+
+${contentGoal ? `CONTENT GOAL: ${contentGoal}\n` : ''}
+
+Return EXACTLY this format:
+### CAPTION 1 — [style]
+[caption body]
+**Hashtags:** [hashtags]`,
+    }],
+  });
+
+  return msg.content[0].text.trim();
+}
+
+module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption };

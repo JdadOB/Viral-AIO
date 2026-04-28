@@ -71,7 +71,7 @@ module.exports = function mountSheetsRoutes(app, { requireAuth, requireManager, 
     db.prepare(`UPDATE accounts SET sheets_sheet_id = ?, sheets_tab_mode = ?, sheets_manual_tab = ?, sheets_col_map = ? WHERE id = ?`)
       .run(sheetId, tabMode || 'date', manualTab || null, colMap ? JSON.stringify(colMap) : null, account.id);
 
-    logActivity(req.user.id, req.user.name, userRole(req.user), 'account_sheets_config_saved', { aaccountId: account.id, sheetId });
+    logActivity(req.user.id, req.user.name, userRole(req.user), 'account_sheets_config_saved', { accountId: account.id, sheetId });
     res.json({ success: true, sheetId });
   });
 

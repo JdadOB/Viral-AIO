@@ -1496,7 +1496,7 @@ function addSheetsExportButton(panelId, outputId, username, ccountId) {
     statusSpan.textContent = '';
     try {
       const body = { outputId, date: datePicker.value };
-      if (ccountId) body.ccountId = ccountId;
+      if (ccountId) body.accountId = ccountId;
       const result = await api('/api/sheets/export-output', { method: 'POST', body });
       btn.innerHTML = '📊 Export to Google Sheet';
       statusSpan.innerHTML = `<span style="color:var(--green)">✓ ${result.message}</span>`;
@@ -1688,8 +1688,7 @@ function wireAgentButtons() {
     try {
       const result = await api('/api/agents/writer', { method: 'POST', body: { username, contentGoal } });
       setAgentStatus('writer', 'done');
-      showAgentOutput('writer-output', result.reviewed);
-      addSheetsExportButton('writer-output', result.id, username, accountId);
+      renderWriterCaptions('writer-output', result.reviewed, result.id, username, contentGoal, accountId);
       toast('Captions ready', 'success');
       loadAgentHistory();
     } catch (err) {
@@ -1981,6 +1980,317 @@ function renderBulkFileList() {
       renderBulkFileList();
       if (_bulkFiles.length <= 10) $('#bulk-error-msg').style.display = 'none';
     });
+  });
+}
+
+// ── Writer caption card renderer ──────────────────────────────────────────────────
+
+function parseWriterCaptions(text) {
+  const captions = [];
+  const re = /###\s*CAPTION\s*(\d+)[^\n]*\n([\s\S]*?)(?=###\s*CAPTION|\s*$)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const idx = parseInt(m[1]) - 1;
+    const block = m[2].trim();
+    const hashMatch = block.match(/\*\*Hashtags:\*\*\s*([\s\S]*?)$/i);
+    const hashtags = hashMatch ? hashMatch[1].trim() : '';
+    const body = block.replace(/\*\*Hashtags:\*\*[\s\S]*$/i, '').trim();
+    const styleMatch = text.match(new RegExp(`###\\s*CAPTION\\s*${idx+1}[^\\n]*—\\s*([^\\n]+)`));
+    const style = styleMatch ? styleMatch[1].trim() : '';
+    captions.push({ idx, body, hashtags, style });
+  }
+  return captions;
+}
+
+function renderWriterCaptions(panelId, text, outputId, username, contentGoal, accountId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  const captions = parseWriterCaptions(text);
+  if (!captions.length) {
+    // Fallback: render as markdown if parsing fails
+    showAgentOutput(panelId, text);
+    addSheetsExportButton(panelId, outputId, username, accountId);
+    return;
+  }
+
+  panel.classList.add('open');
+  panel.innerHTML = '';
+
+  // Caption cards container
+  const cardsWrap = document.createElement('div');
+  cardsWrap.className = 'writer-caption-cards';
+  cardsWrap.style.cssText = 'display:flex;flex-direction:column;gap:16px;margin-bottom:16px';
+
+  captions.forEach((cap, ci) => {
+    const card = document.createElement('div');
+    card.className = 'caption-card writer-caption-card';
+    card.dataset.captionIndex = ci;
+    card.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;position:relative';
+
+    // Top row: number, style badge, platform select, refresh btn, copy btn
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap';
+
+    const numBadge = document.createElement('span');
+    numBadge.className = 'caption-num';
+    numBadge.textContent = `Caption ${ci + 1}`;
+
+    const styleBadge = document.createElement('span');
+    styleBadge.className = 'caption-style-badge';
+    styleBadge.textContent = cap.style || 'writer';
+    styleBadge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:20px;background:var(--accent-dim,rgba(48,209,88,0.15));color:var(--green);flex-shrink:0';
+
+    const platformSelect = document.createElement('select');
+    platformSelect.className = 'caption-platform-select agent-select';
+    platformSelect.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:6px;flex-shrink:0';
+    ['TikTok', 'IG Reels', 'OF'].forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      platformSelect.appendChild(opt);
+    });
+
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn';
+    refreshBtn.style.cssText = 'font-size:11px;padding:3px 10px;border-color:var(--text-dim);color:var(--text-dim)';
+    refreshBtn.textContent = '🔄 Refresh';
+    refreshBtn.title = 'Generate a fresh caption with a different angle';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'caption-copy-btn btn';
+    copyBtn.style.cssText = 'font-size:11px;padding:3px 10px';
+    copyBtn.textContent = 'Copy';
+
+    topRow.append(numBadge, styleBadge, platformSelect, spacer, refreshBtn, copyBtn);
+
+    // Caption body (editable)
+    const bodyDiv = document.createElement('div');
+    bodyDiv.className = 'caption-card-text caption-editable';
+    bodyDiv.contentEditable = 'true';
+    bodyDiv.textContent = cap.body;
+    bodyDiv.style.cssText = 'min-height:60px;border:1px solid transparent;border-radius:6px;padding:6px 8px;transition:border-color 0.2s;outline:none;white-space:pre-wrap;line-height:1.5;font-size:13px';
+    bodyDiv.addEventListener('focus', () => bodyDiv.style.borderColor = 'var(--border-focus,var(--accent,#30D158))');
+    bodyDiv.addEventListener('blur',  () => bodyDiv.style.borderColor = 'transparent');
+
+    // Hashtags (editable)
+    const tagsDiv = document.createElement('div');
+    tagsDiv.className = 'caption-card-tags caption-tags-editable';
+    tagsDiv.contentEditable = 'true';
+    tagsDiv.textContent = cap.hashtags;
+    tagsDiv.style.cssText = 'font-size:11px;color:var(--text-dim);margin-top:8px;border:1px solid transparent;border-radius:6px;padding:4px 8px;transition:border-color 0.2s;outline:none;white-space:pre-wrap';
+    tagsDiv.addEventListener('focus', () => tagsDiv.style.borderColor = 'var(--border-focus,var(--accent,#30D158))');
+    tagsDiv.addEventListener('blur',  () => tagsDiv.style.borderColor = 'transparent');
+
+    // Bottom row: Dropbox input + rating buttons
+    const bottomRow = document.createElement('div');
+    bottomRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap';
+
+    const dropboxInput = document.createElement('input');
+    dropboxInput.type = 'text';
+    dropboxInput.className = 'caption-dropbox-input agent-input';
+    dropboxInput.placeholder = 'Dropbox link...';
+    dropboxInput.style.cssText = 'flex:1;min-width:180px;font-size:12px;padding:5px 10px';
+
+    const thumbUp = document.createElement('button');
+    thumbUp.className = 'btn caption-rate-btn';
+    thumbUp.dataset.rating = 'up';
+    thumbUp.style.cssText = 'font-size:14px;padding:3px 10px;border-color:var(--text-dim)';
+    thumbUp.textContent = '👍';
+    thumbUp.title = 'Good caption';
+
+    const thumbDown = document.createElement('button');
+    thumbDown.className = 'btn caption-rate-btn';
+    thumbDown.dataset.rating = 'down';
+    thumbDown.style.cssText = 'font-size:14px;padding:3px 10px;border-color:var(--text-dim)';
+    thumbDown.textContent = '👎';
+    thumbDown.title = 'Bad caption';
+
+    bottomRow.append(dropboxInput, thumbUp, thumbDown);
+
+    card.append(topRow, bodyDiv, tagsDiv, bottomRow);
+    cardsWrap.appendChild(card);
+
+    // Wire refresh button
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<span class="spinner"></span>';
+      card.style.opacity = '0.6';
+      try {
+        const res = await api('/api/agents/writer/refresh-caption', {
+          method: 'POST',
+          body: { username, contentGoal: contentGoal || null },
+        });
+        // Parse the returned single caption
+        const newCaps = parseWriterCaptions(res.caption);
+        if (newCaps.length) {
+          bodyDiv.textContent = newCaps[0].body;
+          tagsDiv.textContent = newCaps[0].hashtags;
+          styleBadge.textContent = newCaps[0].style || 'refreshed';
+        } else {
+          bodyDiv.textContent = res.caption;
+          tagsDiv.textContent = '';
+        }
+        toast('Caption refreshed', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+        card.style.opacity = '1';
+      }
+    });
+
+    // Wire copy button
+    copyBtn.addEventListener('click', () => {
+      const full = bodyDiv.textContent + (tagsDiv.textContent ? '\n\n' + tagsDiv.textContent : '');
+      navigator.clipboard.writeText(full).then(() => {
+        copyBtn.textContent = '✓ Copied';
+        copyBtn.style.color = 'var(--green)';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.style.color = ''; }, 2200);
+      }).catch(() => toast('Copy failed', 'error'));
+    });
+
+    // Wire rating buttons
+    [thumbUp, thumbDown].forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const rating = btn.dataset.rating;
+        try {
+          await api('/api/captions/rate', { method: 'POST', body: { outputId, captionIndex: ci, rating } });
+          thumbUp.style.borderColor   = rating === 'up'   ? 'var(--green)' : 'var(--text-dim)';
+          thumbDown.style.borderColor = rating === 'down' ? 'var(--red)'   : 'var(--text-dim)';
+          thumbUp.style.color   = rating === 'up'   ? 'var(--green)' : '';
+          thumbDown.style.color = rating === 'down' ? 'var(--red)'   : '';
+        } catch (err) {
+          toast('Rating failed: ' + err.message, 'error');
+        }
+      });
+    });
+  });
+
+  panel.appendChild(cardsWrap);
+
+  // Export button — collects live card data
+  const exportWrap = document.createElement('div');
+  exportWrap.className = 'sheets-export-btn-wrap';
+  exportWrap.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px';
+
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn';
+  exportBtn.style.cssText = 'border-color:var(--green);color:var(--green);display:flex;align-items:center;gap:6px';
+  exportBtn.innerHTML = '📊 Export to Google Sheet';
+
+  const datePicker = document.createElement('input');
+  datePicker.type = 'date';
+  datePicker.className = 'agent-input';
+  datePicker.style.cssText = 'max-width:160px;font-size:12px;padding:6px 10px';
+  datePicker.value = new Date().toISOString().slice(0, 10);
+  datePicker.title = 'Which date tab to export to';
+
+  const statusSpan = document.createElement('span');
+  statusSpan.style.cssText = 'font-size:12px;color:var(--text-sub)';
+
+  // Caption history button
+  const historyBtn = document.createElement('button');
+  historyBtn.className = 'btn';
+  historyBtn.style.cssText = 'border-color:var(--cyan);color:var(--cyan);font-size:12px;padding:5px 12px';
+  historyBtn.textContent = '📜 History';
+  historyBtn.title = `View all past caption runs for @${username}`;
+
+  exportBtn.addEventListener('click', async () => {
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="spinner"></span> Exporting...';
+    statusSpan.textContent = '';
+    try {
+      // Collect caption data from live cards
+      const captionCards = cardsWrap.querySelectorAll('.writer-caption-card');
+      const captionsPayload = Array.from(captionCards).map(c => {
+        const body = c.querySelector('.caption-editable')?.textContent || '';
+        const tags = c.querySelector('.caption-tags-editable')?.textContent || '';
+        const dropboxLink = c.querySelector('.caption-dropbox-input')?.value || '';
+        const platform = c.querySelector('.caption-platform-select')?.value || '';
+        return {
+          caption: body + (tags ? '\n\n' + tags : ''),
+          dropboxLink,
+          platform,
+          category: '',
+        };
+      }).filter(c => c.caption.trim());
+
+      const body = { captions: captionsPayload, date: datePicker.value };
+      if (accountId) body.accountId = accountId;
+      const result = await api('/api/sheets/export', { method: 'POST', body });
+      exportBtn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--green)">✓ ${result.message}</span>`;
+      toast(result.message, 'success');
+    } catch (err) {
+      exportBtn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+
+  historyBtn.addEventListener('click', () => showCaptionHistory(username));
+
+  exportWrap.append(exportBtn, datePicker, historyBtn, statusSpan);
+  panel.appendChild(exportWrap);
+}
+
+function showCaptionHistory(username) {
+  const panel = document.getElementById('writer-output');
+  if (!panel) return;
+
+  const historyWrap = document.createElement('div');
+  historyWrap.className = 'caption-history-panel';
+  historyWrap.style.cssText = 'margin-top:20px;border-top:1px solid var(--border);padding-top:16px';
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em';
+  title.textContent = `Caption History — @${username}`;
+
+  const listWrap = document.createElement('div');
+  listWrap.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">Loading...</span>';
+
+  historyWrap.append(title, listWrap);
+  panel.querySelector('.caption-history-panel')?.remove();
+  panel.appendChild(historyWrap);
+
+  api(`/api/captions/history/${encodeURIComponent(username)}`).then(rows => {
+    if (!rows.length) {
+      listWrap.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">No caption history yet.</span>';
+      return;
+    }
+    listWrap.innerHTML = '';
+    rows.forEach(row => {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px';
+
+      const date = document.createElement('span');
+      date.style.cssText = 'color:var(--text-dim);flex-shrink:0;min-width:130px';
+      date.textContent = new Date(row.created_at).toLocaleString();
+
+      const preview = document.createElement('span');
+      preview.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-sub)';
+      const firstCaption = (row.reviewed_output || '').split('\n').find(l => l.trim() && !l.startsWith('#'));
+      preview.textContent = firstCaption || row.input_summary || '(no preview)';
+
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'btn';
+      loadBtn.style.cssText = 'font-size:11px;padding:3px 10px;flex-shrink:0';
+      loadBtn.textContent = 'Load';
+      loadBtn.addEventListener('click', () => {
+        renderWriterCaptions('writer-output', row.reviewed_output || '', row.id, username, null, null);
+        toast('Caption run loaded', 'success');
+      });
+
+      item.append(date, preview, loadBtn);
+      listWrap.appendChild(item);
+    });
+  }).catch(err => {
+    listWrap.innerHTML = `<span style="color:var(--red);font-size:12px">${err.message}</span>`;
   });
 }
 
