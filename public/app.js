@@ -1426,6 +1426,229 @@ async function renderAgents() {
   wireAgentButtons();
 }
 
+function wireAgentButtons() {
+  // Modal close
+  $('#output-modal-close')?.addEventListener('click', () => $('#output-modal')?.classList.add('hidden'));
+
+  // Sheet panels for writer + bulk
+  wireAccountSheetPanel('writer-username', 'writer-sheet-status');
+  wireAccountSheetPanel('bulk-username', 'bulk-sheet-status');
+
+  // ── Strategist ──────────────────────────────────────────────────────────────
+  $('#strategist-run-btn')?.addEventListener('click', async () => {
+    const days = parseInt($('#strategist-days').value) || 7;
+    const btn = $('#strategist-run-btn');
+    setAgentStatus('strategist', 'running');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/strategist', { method: 'POST', body: { days } });
+      showAgentOutput('strategist-output', result.reviewed || result.raw);
+      addSheetsExportButton('strategist-output', result.id, null, null);
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAgentStatus('strategist', 'idle'); btn.disabled = false; }
+  });
+
+  // ── Writer ──────────────────────────────────────────────────────────────────
+  $('#writer-run-btn')?.addEventListener('click', async () => {
+    const sel = $('#writer-username');
+    const username = sel?.value;
+    if (!username) return toast('Select a creator profile', 'error');
+    const accountId = sel?.selectedOptions[0]?.dataset.accountId;
+    const contentGoal = $('#writer-goal')?.value?.trim() || null;
+    const btn = $('#writer-run-btn');
+    setAgentStatus('writer', 'running');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/writer', { method: 'POST', body: { username, contentGoal } });
+      renderWriterCaptions('writer-output', result.reviewed || result.raw, result.id, username, contentGoal, accountId);
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAgentStatus('writer', 'idle'); btn.disabled = false; }
+  });
+
+  // ── Assistant ───────────────────────────────────────────────────────────────
+  $('#assistant-run-btn')?.addEventListener('click', async () => {
+    const question = $('#assistant-question')?.value?.trim();
+    if (!question) return toast('Enter a question', 'error');
+    const btn = $('#assistant-run-btn');
+    setAgentStatus('assistant', 'running');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/assistant', { method: 'POST', body: { question } });
+      showAgentOutput('assistant-output', result.reviewed || result.raw);
+      addSheetsExportButton('assistant-output', result.id, null, null);
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAgentStatus('assistant', 'idle'); btn.disabled = false; }
+  });
+
+  // ── Captain ─────────────────────────────────────────────────────────────────
+  $('#captain-run-btn')?.addEventListener('click', async () => {
+    const outputId = $('#captain-output-id')?.value?.trim();
+    if (!outputId) return toast('Enter an output ID', 'error');
+    const btn = $('#captain-run-btn');
+    setAgentStatus('captain', 'running');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/captain', { method: 'POST', body: { outputId } });
+      showOutputModal(`Captain — Output #${result.id}`, result.reviewed, result.notes);
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAgentStatus('captain', 'idle'); btn.disabled = false; }
+  });
+
+  // ── Ideator ─────────────────────────────────────────────────────────────────
+  $('#ideator-run-btn')?.addEventListener('click', async () => {
+    const group = $('#ideator-group')?.value || null;
+    const btn = $('#ideator-run-btn');
+    setAgentStatus('ideator', 'running');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/ideator', { method: 'POST', body: { group } });
+      showAgentOutput('ideator-output', result.reviewed || result.raw);
+      addSheetsExportButton('ideator-output', result.id, null, null);
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAgentStatus('ideator', 'idle'); btn.disabled = false; }
+  });
+
+  // ── Ideator V2 ──────────────────────────────────────────────────────────────
+  $('#ideator-v2-run-btn')?.addEventListener('click', async () => {
+    const username = $('#ideator-v2-username')?.value;
+    if (!username) return toast('Select a creator profile', 'error');
+    const btn = $('#ideator-v2-run-btn');
+    const statusEl = $('#ideator-v2-status');
+    if (statusEl) statusEl.className = 'agent-status running';
+    btn.disabled = true;
+    try {
+      const result = await api('/api/agents/ideator-v2', { method: 'POST', body: { username } });
+      const out = $('#ideator-v2-output');
+      if (out) { out.style.display = 'block'; out.innerHTML = renderMarkdown(result.reviewed || result.raw || ''); }
+      loadAgentHistory();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { if (statusEl) statusEl.className = 'agent-status idle'; btn.disabled = false; }
+  });
+
+  // ── Bulk captions dropzone + generate ───────────────────────────────────────
+  const dropzone  = $('#video-dropzone');
+  const fileInput = $('#video-file-input');
+
+  function renderFileList() {
+    const listEl = $('#video-file-list');
+    if (!listEl) return;
+    listEl.innerHTML = _bulkFiles.map((f, i) => {
+      const thumb = _bulkThumbnails[f.name]
+        ? `<img src="${_bulkThumbnails[f.name]}" style="width:48px;height:32px;object-fit:cover;border-radius:4px;flex-shrink:0">`
+        : `<div style="width:48px;height:32px;background:var(--card-hover);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">▶</div>`;
+      const size = (f.size / (1024 * 1024)).toFixed(1);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        ${thumb}
+        <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(f.name)}</span>
+        <span style="font-size:11px;color:var(--text-dim);flex-shrink:0">${size} MB</span>
+        <button class="btn" data-remove="${i}" style="font-size:11px;padding:2px 8px;border-color:var(--red);color:var(--red);flex-shrink:0">✕</button>
+      </div>`;
+    }).join('');
+    listEl.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', () => { _bulkFiles.splice(parseInt(btn.dataset.remove), 1); renderFileList(); });
+    });
+  }
+
+  function addFiles(fileList) {
+    const incoming = Array.from(fileList).filter(f => {
+      if (f.size > 500 * 1024 * 1024) { toast(`${f.name} exceeds 500 MB`, 'error'); return false; }
+      return true;
+    });
+    const slots = 10 - _bulkFiles.length;
+    if (incoming.length > slots) { toast(`Max 10 videos — only ${slots} slot(s) remaining`, 'error'); incoming.splice(slots); }
+    incoming.forEach(f => { if (!_bulkFiles.find(x => x.name === f.name)) _bulkFiles.push(f); });
+    renderFileList();
+  }
+
+  function extractFrames(file) {
+    return new Promise(resolve => {
+      const video = document.createElement('video');
+      video.muted = true; video.playsInline = true; video.preload = 'metadata';
+      const url = URL.createObjectURL(file);
+      video.src = url;
+      const frames = [];
+      const offsets = [0.1, 0.5, 0.85];
+      let idx = 0;
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 180;
+      const ctx = canvas.getContext('2d');
+
+      function seekNext() {
+        if (idx >= offsets.length) {
+          URL.revokeObjectURL(url);
+          if (frames.length) {
+            _bulkThumbnails[file.name] = canvas.toDataURL('image/jpeg', 0.6);
+            _bulkKeyframes[file.name] = frames;
+          }
+          return resolve();
+        }
+        video.currentTime = video.duration * offsets[idx];
+      }
+
+      video.addEventListener('loadedmetadata', () => seekNext());
+      video.addEventListener('seeked', () => {
+        try {
+          ctx.drawImage(video, 0, 0, 320, 180);
+          frames.push(canvas.toDataURL('image/jpeg', 0.5).split(',')[1]);
+          if (idx === 0) _bulkThumbnails[file.name] = canvas.toDataURL('image/jpeg', 0.6);
+        } catch (_) {}
+        idx++;
+        seekNext();
+      });
+      video.addEventListener('error', () => { URL.revokeObjectURL(url); resolve(); }, { once: true });
+      setTimeout(() => { URL.revokeObjectURL(url); resolve(); }, 8000);
+    });
+  }
+
+  if (dropzone) {
+    dropzone.addEventListener('click', () => fileInput?.click());
+    dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); addFiles(e.dataTransfer.files); });
+  }
+  if (fileInput) {
+    fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+  }
+
+  $('#bulk-generate-btn')?.addEventListener('click', async () => {
+    const sel = $('#bulk-username');
+    const username = sel?.value;
+    if (!username) return toast('Select a creator profile', 'error');
+    if (!_bulkFiles.length) return toast('Upload at least one video', 'error');
+    const errorEl = $('#bulk-error-msg');
+    if (errorEl) errorEl.style.display = 'none';
+    const btn = $('#bulk-generate-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Extracting frames…';
+    setAgentStatus('bulk', 'running');
+    _bulkUsername = username;
+    _bulkAccountId = sel?.selectedOptions[0]?.dataset.accountId || null;
+
+    await Promise.all(_bulkFiles.map(f => extractFrames(f)));
+    renderFileList();
+
+    btn.innerHTML = '<span class="spinner"></span> Generating captions…';
+    try {
+      const videos = _bulkFiles.map(f => ({ name: f.name, size: f.size, keyframes: _bulkKeyframes[f.name] || [] }));
+      const result = await api('/api/agents/bulk-captions', { method: 'POST', body: { username, videos } });
+      renderBulkCaptionResults(result.results, result.id, username, _bulkAccountId);
+      loadAgentHistory();
+    } catch (err) {
+      if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = 'block'; }
+      toast(err.message, 'error');
+    } finally {
+      setAgentStatus('bulk', 'idle');
+      btn.disabled = false;
+      btn.textContent = 'Generate Captions';
+    }
+  });
+}
+
 function loadAgentHistory() {
   api('/api/agents/history').then(rows => {
     const el = $('#agent-history-list');
