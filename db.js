@@ -168,6 +168,9 @@ try { db.exec('ALTER TABLE accounts ADD COLUMN user_id INTEGER REFERENCES users(
 try { db.exec('ALTER TABLE agent_outputs ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
+try { db.exec('ALTER TABLE agent_outputs ADD COLUMN client_output TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS user_groups (
