@@ -313,6 +313,21 @@ app.post('/api/waitlist', (req, res) => {
   }
 });
 
+// Admin: view waitlist submissions
+app.get('/api/admin/waitlist', requireAdmin, (req, res) => {
+  try {
+    const rows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'waitlist_%' ORDER BY key DESC").all();
+    const entries = rows.map(r => {
+      const parts = r.key.split('_');
+      const ts = parseInt(parts[1]) || 0;
+      return { email: r.value, submittedAt: ts ? new Date(ts).toISOString() : 'unknown' };
+    });
+    res.json(entries);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Legal pages
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));

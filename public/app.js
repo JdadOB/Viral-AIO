@@ -2815,6 +2815,12 @@ async function renderAdmin() {
         <div id="admin-user-list">Loading...</div>
       </div>
 
+      <!-- Waitlist -->
+      <div class="settings-card" style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:14px">Access Requests (Waitlist)</div>
+        <div id="admin-waitlist">Loading...</div>
+      </div>
+
       <!-- Activity Log -->
       <div class="settings-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -2855,6 +2861,28 @@ async function renderAdmin() {
 
   loadAdminUsers();
   loadActivityLog();
+  loadWaitlist();
+}
+
+async function loadWaitlist() {
+  try {
+    const entries = await api('/api/admin/waitlist');
+    const container = document.getElementById('admin-waitlist');
+    if (!container) return;
+    if (!entries.length) { container.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">No waitlist submissions yet.</p>'; return; }
+    const emails = entries.map(e => e.email).join(', ');
+    container.innerHTML = "
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-sub)">\ submission\</span>
+        <button class="btn" style="font-size:12px;padding:4px 12px" onclick="navigator.clipboard.writeText('\').then(() => toast('Emails copied', 'success'))">Copy All Emails</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        \
+      </div>
+    ";
+  } catch (err) {
+    console.error('Waitlist load error:', err);
+  }
 }
 
 const ROLE_COLORS = { admin: 'var(--accent)', manager: 'var(--cyan)', client: 'var(--green)' };
