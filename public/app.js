@@ -1509,7 +1509,10 @@ function wireAgentButtons() {
       const isClient = currentUser?.role === 'client';
       const ideatorText = (isClient && result.clientOutput) ? result.clientOutput : (result.reviewed || result.raw);
       showAgentOutput('ideator-output', ideatorText);
-      if (!isClient) addSheetsExportButton('ideator-output', result.id, null, null);
+      if (!isClient) {
+        addSheetsExportButton('ideator-output', result.id, null, null);
+        addClientViewToggle('ideator-output', result.reviewed || result.raw, result.clientOutput);
+      }
       loadAgentHistory();
     } catch (err) { toast(err.message, 'error'); }
     finally { setAgentStatus('ideator', 'idle'); btn.disabled = false; }
@@ -1531,6 +1534,7 @@ function wireAgentButtons() {
         const ideatorV2Text = (isClient && result.clientOutput) ? result.clientOutput : (result.reviewed || result.raw || '');
         out.style.display = 'block';
         out.innerHTML = renderMarkdown(ideatorV2Text);
+        if (!isClient && result.clientOutput) addClientViewToggle('ideator-v2-output', result.reviewed || result.raw, result.clientOutput);
       }
       loadAgentHistory();
     } catch (err) { toast(err.message, 'error'); }
@@ -1880,6 +1884,36 @@ function wireAccountSheetPanelEvents(statusDiv, accountId) {
       saveBtn.textContent = 'Save';
     }
   });
+}
+
+function addClientViewToggle(panelId, managerText, clientText) {
+  if (!clientText) return;
+  const panel = $(`#${panelId}`);
+  if (!panel) return;
+  panel.querySelector('.client-view-toggle-wrap')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'client-view-toggle-wrap';
+  wrap.style.cssText = 'margin-top:10px;display:flex;align-items:center;gap:8px';
+
+  let showingClient = false;
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.style.cssText = 'font-size:11px;padding:3px 10px;border-color:var(--cyan);color:var(--cyan)';
+  btn.textContent = '👥 Preview Client View';
+
+  btn.addEventListener('click', () => {
+    showingClient = !showingClient;
+    panel.innerHTML = renderMarkdown(showingClient ? clientText : managerText);
+    panel.classList.add('open');
+    btn.textContent = showingClient ? '📊 Back to Manager View' : '👥 Preview Client View';
+    btn.style.borderColor = showingClient ? 'var(--amber)' : 'var(--cyan)';
+    btn.style.color       = showingClient ? 'var(--amber)' : 'var(--cyan)';
+    panel.appendChild(wrap); // re-attach after innerHTML reset
+  });
+
+  wrap.appendChild(btn);
+  panel.appendChild(wrap);
 }
 
 function showAgentOutput(panelId, text) {
