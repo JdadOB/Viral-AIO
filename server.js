@@ -313,6 +313,10 @@ app.post('/api/waitlist', (req, res) => {
   }
 });
 
+// Legal pages
+app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
+app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));
+
 // Public landing page
 app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'landing.html'));

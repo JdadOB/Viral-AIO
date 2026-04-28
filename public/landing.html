@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ViralTrack — Creator Intelligence Platform</title>
   <meta name="description" content="Track viral moments, generate creator-voice captions, and dominate growth for your clients. Built for creator and influencer agencies.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%236366f1'/><path d='M13 2L3 14h9l-1 8 10-12h-9l1-8z' fill='white' stroke='none'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -18,8 +19,8 @@
       --border:   rgba(255,255,255,0.07);
       --border2:  rgba(255,255,255,0.12);
       --text:     #f2f2f7;
-      --sub:      #8e8e93;
-      --dim:      #48484a;
+      --sub:      #aeaeb2;
+      --dim:      #6c6c70;
       --green:    #30d158;
       --accent:   #6366f1;
       --accent2:  #818cf8;
@@ -162,16 +163,16 @@
       background: linear-gradient(135deg, var(--text), var(--sub));
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-    .hero-stat .label { font-size: 12px; color: var(--dim); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .hero-stat .label { font-size: 12px; color: var(--sub); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
 
     /* TRUST BAR */
     .trust-bar {
       background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
       padding: 20px 24px; text-align: center;
     }
-    .trust-bar p { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px; }
+    .trust-bar p { font-size: 12px; color: var(--sub); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px; }
     .trust-items { display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap; }
-    .trust-item { font-size: 14px; font-weight: 600; color: var(--sub); display: flex; align-items: center; gap: 8px; }
+    .trust-item { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
 
     /* SECTION COMMON */
     section { padding: 100px 24px; }
@@ -287,11 +288,11 @@
     /* COMPARISON TABLE */
     .compare-table { width: 100%; border-collapse: collapse; margin-top: 56px; }
     .compare-table th, .compare-table td { padding: 14px 20px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
-    .compare-table th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+    .compare-table th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sub); }
     .compare-table th:not(:first-child), .compare-table td:not(:first-child) { text-align: center; }
     .compare-table tr:hover td { background: rgba(255,255,255,0.02); }
     .compare-table .check { color: var(--green); font-size: 16px; }
-    .compare-table .cross { color: var(--dim); font-size: 16px; }
+    .compare-table .cross { color: var(--sub); font-size: 16px; }
     .compare-table .tier-header { font-weight: 700; color: var(--text); font-size: 15px; }
     .compare-table .featured-col { color: var(--accent2); }
 
@@ -370,13 +371,18 @@
       nav { padding: 14px 20px; }
       .nav-links { display: none; }
       .hero { padding: 140px 20px 60px; }
-      .hero-stats { gap: 24px; }
+      .hero-stats { gap: 24px; padding: 20px; }
+      .hero-stat .num { font-size: 22px; }
       section { padding: 70px 20px; }
       .step { flex-direction: column; gap: 16px; }
       .capture-form { flex-direction: column; }
       .preview-inner { grid-template-columns: 1fr; }
       .preview-sidebar { display: none; }
       .preview-stat-row { grid-template-columns: repeat(2, 1fr); }
+      .compare-table { display: none; }
+      .mobile-compare-note { display: block !important; }
+      .urgency-bar { font-size: 11px; padding: 7px 12px; }
+      .pricing-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -677,6 +683,9 @@
         </tbody>
       </table>
     </div>
+    <p class="mobile-compare-note" style="display:none;margin-top:24px;font-size:14px;color:var(--sub);text-align:center">
+      📊 Full feature comparison available on desktop
+    </p>
   </div>
 </section>
 
@@ -776,16 +785,44 @@
 </section>
 
 <!-- FOOTER -->
-<div>
-  <div class="footer-inner">
-    <div class="footer-logo">Viral<span class="accent">Track</span> — Creator Intelligence</div>
-    <div class="footer-links">
-      <a href="#features">Features</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#faq">FAQ</a>
-      <a href="/login">Login</a>
+<div style="background:var(--bg2);border-top:1px solid var(--border)">
+  <div class="footer-inner" style="flex-direction:column;gap:28px;padding:48px 24px 32px;max-width:1100px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:32px;width:100%">
+      <div>
+        <div class="footer-logo" style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px">Viral<span class="accent">Track</span></div>
+        <p style="font-size:14px;color:var(--sub);max-width:260px;line-height:1.6">Creator intelligence platform for agencies that take growth seriously.</p>
+        <p style="font-size:13px;color:var(--dim);margin-top:12px">📧 <a href="mailto:support@viraltrack.app" style="color:var(--sub);text-decoration:none">support@viraltrack.app</a></p>
+      </div>
+      <div style="display:flex;gap:48px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:12px">Product</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <a href="#features" style="font-size:14px;color:var(--sub);text-decoration:none">Features</a>
+            <a href="#how-it-works" style="font-size:14px;color:var(--sub);text-decoration:none">How It Works</a>
+            <a href="#pricing" style="font-size:14px;color:var(--sub);text-decoration:none">Pricing</a>
+            <a href="#faq" style="font-size:14px;color:var(--sub);text-decoration:none">FAQ</a>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:12px">Account</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <a href="/login" style="font-size:14px;color:var(--sub);text-decoration:none">Login</a>
+            <a href="/login" style="font-size:14px;color:var(--sub);text-decoration:none">Request Access</a>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:12px">Legal</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <a href="/privacy" style="font-size:14px;color:var(--sub);text-decoration:none">Privacy Policy</a>
+            <a href="/terms" style="font-size:14px;color:var(--sub);text-decoration:none">Terms of Service</a>
+          </div>
+        </div>
+      </div>
     </div>
-    <p style="font-size:13px;color:var(--dim)">© 2026 ViralTrack.</p>
+    <div style="border-top:1px solid var(--border);padding-top:24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;width:100%">
+      <p style="font-size:13px;color:var(--dim)">© 2026 ViralTrack. All rights reserved.</p>
+      <p style="font-size:12px;color:var(--dim)">Built for creators. Powered by AI.</p>
+    </div>
   </div>
 </div>
 
