@@ -1,4 +1,4 @@
-// Load .env manually — dotenv has a parse issue with this file on Windows
+﻿// Load .env manually — dotenv has a parse issue with this file on Windows
 (function loadEnv() {
   const fs = require('fs'), p = require('path').join(__dirname, '.env');
   if (!fs.existsSync(p)) return;
@@ -300,7 +300,13 @@ app.get('/api/admin/logs', requireAdmin, (req, res) => {
 });
 
 // Main app — auth required
-app.get('/', requireAuth, (req, res) => {
+// Public landing page
+app.get('/landing', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'landing.html'));
+});
+
+app.get('/', (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/landing');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
