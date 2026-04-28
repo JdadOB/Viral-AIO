@@ -1975,6 +1975,54 @@ select option { background: var(--bg-2); }
   word-break: break-word;
 }
 
+/* ── Writer Caption Cards (interactive) ─────────────────────── */
+.writer-caption-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.writer-caption-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.writer-caption-card.rated-up  { border-color: var(--green); }
+.writer-caption-card.rated-down { border-color: var(--red); }
+.caption-text-edit {
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  min-height: 80px;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-3);
+  cursor: text;
+  word-break: break-word;
+}
+.caption-text-edit:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.caption-dropbox-input { font-size: 12px; margin: 0; }
+.caption-platform-sel { font-size: 12px; padding: 4px 8px; flex: 1; max-width: 160px; }
+.caption-action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.caption-rate-btn {
+  font-size: 15px;
+  padding: 4px 10px;
+  border-color: var(--border);
+  background: none;
+  transition: border-color var(--t), background var(--t);
+}
+.caption-rate-btn.rated { background: rgba(255,255,255,0.06); border-color: var(--text-main); }
+.caption-refresh-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-left: auto;
+  border-color: var(--text-sub);
+  color: var(--text-sub);
+}
+.caption-refresh-btn:hover { border-color: var(--text-main); color: var(--text-main); }
+
 /* ── Ideator V2 Output ───────────────────────────────────────── */
 .ideator-v2-output { margin-top: 4px; }
 .ideator-v2-cards {

@@ -61,7 +61,7 @@ const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
 const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
-const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption } = require('./agents');
+const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption, refreshBulkSingleCaption } = require('./agents');
 
 const app = express();
 app.use(cors());
@@ -671,6 +671,19 @@ app.post('/api/agents/writer/refresh-caption', requireAuth, async (req, res) => 
     res.json({ caption });
   } catch (err) {
     console.error('[Agent:Writer:Refresh]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Bulk caption refresh (single card) ──────────────────────────────────
+app.post('/api/agents/bulk-captions/refresh-caption', requireAuth, async (req, res) => {
+  try {
+    const { username, videoName, keyframes, currentStyle } = req.body;
+    if (!username || !videoName) return res.status(400).json({ error: 'username and videoName required' });
+    const result = await refreshBulkSingleCaption({ username, videoName, keyframes: keyframes || [], currentStyle, userId: req.scopedUserId });
+    res.json(result);
+  } catch (err) {
+    console.error('[Agent:BulkCaptions:Refresh]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1,4 +1,4 @@
-const APP_VERSION = '0.52';
+﻿const APP_VERSION = '0.52';
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -1135,6 +1135,9 @@ $('#poll-btn').addEventListener('click', async () => {
 let _bulkFiles = [];
 let _bulkResults = null;
 let _bulkThumbnails = {}; // filename → data URL
+let _bulkKeyframes = {};  // filename → keyframes array (for per-card refresh)
+let _bulkUsername = null; // username used for the current bulk run
+let _bulkAccountId = null;
 
 const AGENT_DEF = {
   captain:    { label: 'The Captain',    role: 'Quality Control & Humanizer', icon: 'C', color: '#FF9F0A', bg: 'rgba(255,159,10,0.12)' },
@@ -1199,6 +1202,9 @@ async function renderAgents() {
   _bulkFiles = [];
   _bulkResults = null;
   _bulkThumbnails = {};
+  _bulkKeyframes = {};
+  _bulkUsername = null;
+  _bulkAccountId = null;
   const el = $('#page-agents');
   const accounts = await api('/api/accounts');
 
@@ -1651,6 +1657,188 @@ function showAgentOutput(panelId, text) {
   panel.classList.add('open');
 }
 
+// ── Writer Caption Cards ──────────────────────────────────────────────────────
+
+function parseWriterCaptions(text) {
+  const captions = [];
+  const blockRe = /###\s*CAPTION\s*(\d+)[^\n]*\n([\s\S]*?)(?=###\s*CAPTION|\s*$)/gi;
+  let match;
+  while ((match = blockRe.exec(text)) !== null) {
+    const block = match[2].trim();
+    const hashtagMatch = block.match(/\*\*Hashtags:\*\*\s*([\s\S]*?)$/i);
+    const hashtags = hashtagMatch ? hashtagMatch[1].trim() : '';
+    const body = block.replace(/\*\*Hashtags:\*\*[\s\S]*$/i, '').trim();
+    captions.push({ body, hashtags, full: hashtags ? `${body}\n\n${hashtags}` : body });
+  }
+  return captions;
+}
+
+function renderWriterCaptions(panelId, text, outputId, username, contentGoal, accountId) {
+  const panel = $(`#${panelId}`);
+  if (!panel) return;
+  panel.innerHTML = '';
+  panel.classList.add('open');
+
+  const captions = parseWriterCaptions(text);
+  if (!captions.length) {
+    panel.innerHTML = renderMarkdown(text);
+    addSheetsExportButton(panelId, outputId, username, accountId);
+    return;
+  }
+
+  const cardsWrap = document.createElement('div');
+  cardsWrap.className = 'writer-caption-cards';
+
+  captions.forEach((cap, i) => {
+    const card = document.createElement('div');
+    card.className = 'writer-caption-card';
+    card.dataset.captionIndex = i;
+
+    // Platform row
+    const platformRow = document.createElement('div');
+    platformRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+    const platformLabel = document.createElement('span');
+    platformLabel.style.cssText = 'font-size:11px;color:var(--text-sub);white-space:nowrap';
+    platformLabel.textContent = 'Platform:';
+    const platformSel = document.createElement('select');
+    platformSel.className = 'caption-platform-sel agent-select';
+    ['TikTok', 'IG Reels', 'OF'].forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      platformSel.appendChild(opt);
+    });
+    platformRow.appendChild(platformLabel);
+    platformRow.appendChild(platformSel);
+
+    // Caption text (contenteditable)
+    const captionDiv = document.createElement('div');
+    captionDiv.className = 'caption-text-edit';
+    captionDiv.contentEditable = 'true';
+    captionDiv.textContent = cap.full;
+
+    // Dropbox link
+    const dropboxInput = document.createElement('input');
+    dropboxInput.className = 'caption-dropbox-input agent-input';
+    dropboxInput.type = 'text';
+    dropboxInput.placeholder = 'Dropbox link...';
+
+    // Action row: thumbs + refresh
+    const actionRow = document.createElement('div');
+    actionRow.className = 'caption-action-row';
+
+    const thumbUp = document.createElement('button');
+    thumbUp.className = 'btn caption-rate-btn';
+    thumbUp.dataset.rating = 'up';
+    thumbUp.textContent = '👍';
+
+    const thumbDown = document.createElement('button');
+    thumbDown.className = 'btn caption-rate-btn';
+    thumbDown.dataset.rating = 'down';
+    thumbDown.textContent = '👎';
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn caption-refresh-btn';
+    refreshBtn.textContent = '🔄 Refresh';
+
+    actionRow.appendChild(thumbUp);
+    actionRow.appendChild(thumbDown);
+    actionRow.appendChild(refreshBtn);
+
+    card.appendChild(platformRow);
+    card.appendChild(captionDiv);
+    card.appendChild(dropboxInput);
+    card.appendChild(actionRow);
+    cardsWrap.appendChild(card);
+
+    // Rating
+    [thumbUp, thumbDown].forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const rating = btn.dataset.rating;
+        try {
+          await api('/api/captions/rate', { method: 'POST', body: { outputId, captionIndex: i, rating } });
+          card.classList.remove('rated-up', 'rated-down');
+          card.classList.add(`rated-${rating}`);
+          thumbUp.classList.toggle('rated', rating === 'up');
+          thumbDown.classList.toggle('rated', rating === 'down');
+        } catch (e) { toast(e.message, 'error'); }
+      });
+    });
+
+    // Refresh
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const result = await api('/api/agents/writer/refresh-caption', {
+          method: 'POST',
+          body: { outputId, captionIndex: i, username, contentGoal },
+        });
+        const parsed = parseWriterCaptions(result.caption);
+        captionDiv.textContent = parsed.length ? parsed[0].full : result.caption;
+      } catch (e) { toast(e.message, 'error'); }
+      finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+      }
+    });
+  });
+
+  panel.appendChild(cardsWrap);
+
+  // Export button — collects data from cards
+  const exportWrap = document.createElement('div');
+  exportWrap.className = 'sheets-export-btn-wrap';
+  exportWrap.style.cssText = 'margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn';
+  exportBtn.style.cssText = 'border-color:var(--green);color:var(--green);display:flex;align-items:center;gap:6px';
+  exportBtn.innerHTML = '📊 Export to Google Sheet';
+
+  const datePicker = document.createElement('input');
+  datePicker.type = 'date';
+  datePicker.className = 'agent-input';
+  datePicker.style.cssText = 'max-width:160px;font-size:12px;padding:6px 10px';
+  datePicker.value = new Date().toISOString().slice(0, 10);
+  datePicker.title = 'Which date tab to export to';
+
+  const statusSpan = document.createElement('span');
+  statusSpan.style.cssText = 'font-size:12px;color:var(--text-sub)';
+
+  exportBtn.addEventListener('click', async () => {
+    const cards = cardsWrap.querySelectorAll('.writer-caption-card');
+    const captionData = Array.from(cards).map(c => ({
+      caption: c.querySelector('.caption-text-edit').textContent.trim(),
+      dropboxLink: c.querySelector('.caption-dropbox-input').value.trim(),
+      platform: c.querySelector('.caption-platform-sel').value,
+    })).filter(c => c.caption);
+
+    if (!captionData.length) return toast('No captions to export', 'error');
+
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="spinner"></span> Exporting...';
+    statusSpan.textContent = '';
+    try {
+      const body = { captions: captionData, date: datePicker.value };
+      if (accountId) body.accountId = accountId;
+      const result = await api('/api/sheets/export', { method: 'POST', body });
+      exportBtn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--green)">✓ ${result.message}</span>`;
+      toast(result.message, 'success');
+    } catch (err) {
+      exportBtn.innerHTML = '📊 Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--red)">✗ ${err.message}</span>`;
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+
+  exportWrap.appendChild(exportBtn);
+  exportWrap.appendChild(datePicker);
+  exportWrap.appendChild(statusSpan);
+  panel.appendChild(exportWrap);
+}
+
 function wireAgentButtons() {
   // STRATEGIST
   $('#strategist-run-btn').addEventListener('click', async () => {
@@ -1814,9 +2002,12 @@ function wireAgentButtons() {
       btn.innerHTML = '<span class="spinner"></span> Generating captions...';
       const result = await api('/api/agents/bulk-captions', { method: 'POST', body: { username, videos } });
       _bulkResults = result.results;
+      _bulkUsername = username;
+      _bulkAccountId = accountId;
+      // Store keyframes per video for per-card refresh
+      videos.forEach(v => { _bulkKeyframes[v.name] = v.keyframes; });
       setAgentStatus('bulk', 'done');
-      renderBulkCaptionResults(result.results);
-      addSheetsExportButton('bulk-caption-results', result.id, username, accountId);
+      renderBulkCaptionResults(result.results, result.id, username, accountId);
       toast(`${result.videoCount} video${result.videoCount !== 1 ? 's' : ''} processed — captions ready`, 'success');
       loadAgentHistory();
     } catch (err) {
@@ -2294,49 +2485,248 @@ function showCaptionHistory(username) {
   });
 }
 
-function renderBulkCaptionResults(results) {
+function renderBulkCaptionResults(results, outputId, username, accountId) {
   const container = $('#bulk-caption-results');
   if (!container) return;
   container.style.display = 'block';
-  container.innerHTML = results.map((video, vi) => `
-    <div class="caption-video-group">
-      <div class="caption-video-header">
-        ${_bulkThumbnails[video.videoName]
-          ? `<img class="caption-video-thumb" src="${_bulkThumbnails[video.videoName]}" alt="thumbnail">`
-          : `<span class="caption-video-icon">▶</span>`}
-        <span class="caption-video-name">${escapeHtml(video.videoName)}</span>
-        <span class="caption-count">${(video.captions || []).length} captions</span>
-      </div>
-      <div class="caption-cards-row">
-        ${(video.captions || []).map((cap, ci) => `
-          <div class="caption-card">
-            <div class="caption-card-top">
-              <span class="caption-num">Caption ${ci + 1}</span>
-              <span class="caption-style-badge">${escapeHtml(cap.style || 'default')}</span>
-              <button class="caption-copy-btn" data-vi="${vi}" data-ci="${ci}">Copy</button>
-            </div>
-            <div class="caption-card-text">${escapeHtml(cap.text || '')}</div>
-            ${cap.hashtags ? `<div class="caption-card-tags">${escapeHtml(cap.hashtags)}</div>` : ''}
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `).join('');
+  container.innerHTML = '';
 
-  $$('#bulk-caption-results .caption-copy-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const { vi, ci } = btn.dataset;
-      const cap = _bulkResults[vi].captions[ci];
-      const text = (cap.text || '') + (cap.hashtags ? '\n\n' + cap.hashtags : '');
-      navigator.clipboard.writeText(text).then(() => {
-        btn.textContent = '✓ Copied';
-        btn.style.color = 'var(--green)';
-        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2200);
-      }).catch(() => toast('Copy failed — try selecting and copying manually', 'error'));
+  results.forEach((video, vi) => {
+    const group = document.createElement('div');
+    group.className = 'caption-video-group';
+
+    // Video header
+    const header = document.createElement('div');
+    header.className = 'caption-video-header';
+    if (_bulkThumbnails[video.videoName]) {
+      const img = document.createElement('img');
+      img.className = 'caption-video-thumb';
+      img.src = _bulkThumbnails[video.videoName];
+      img.alt = 'thumbnail';
+      header.appendChild(img);
+    } else {
+      const icon = document.createElement('span');
+      icon.className = 'caption-video-icon';
+      icon.textContent = '\u25ba';
+      header.appendChild(icon);
+    }
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'caption-video-name';
+    nameSpan.textContent = video.videoName;
+    const countSpan = document.createElement('span');
+    countSpan.className = 'caption-count';
+    countSpan.textContent = `${(video.captions || []).length} captions`;
+    header.append(nameSpan, countSpan);
+    group.appendChild(header);
+
+    // Cards row
+    const cardsRow = document.createElement('div');
+    cardsRow.className = 'caption-cards-row';
+    cardsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px';
+
+    (video.captions || []).forEach((cap, ci) => {
+      const card = document.createElement('div');
+      card.className = 'caption-card bulk-caption-card';
+      card.dataset.vi = vi;
+      card.dataset.ci = ci;
+      card.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;flex:1;min-width:260px;max-width:420px;position:relative';
+
+      // Top row
+      const topRow = document.createElement('div');
+      topRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap';
+
+      const numBadge = document.createElement('span');
+      numBadge.className = 'caption-num';
+      numBadge.textContent = `Caption ${ci + 1}`;
+
+      const styleBadge = document.createElement('span');
+      styleBadge.className = 'caption-style-badge';
+      styleBadge.textContent = cap.style || 'default';
+      styleBadge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:20px;background:var(--accent-dim,rgba(48,209,88,0.15));color:var(--green);flex-shrink:0';
+
+      const platformSelect = document.createElement('select');
+      platformSelect.className = 'caption-platform-select agent-select';
+      platformSelect.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:6px;flex-shrink:0';
+      ['TikTok', 'IG Reels', 'OF'].forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        platformSelect.appendChild(opt);
+      });
+
+      const spacer = document.createElement('span');
+      spacer.style.flex = '1';
+
+      const refreshBtn = document.createElement('button');
+      refreshBtn.className = 'btn';
+      refreshBtn.style.cssText = 'font-size:11px;padding:3px 10px;border-color:var(--text-dim);color:var(--text-dim)';
+      refreshBtn.textContent = '\ud83d\udd04 Refresh';
+      refreshBtn.title = 'Regenerate this caption with a different angle';
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn';
+      copyBtn.style.cssText = 'font-size:11px;padding:3px 10px';
+      copyBtn.textContent = 'Copy';
+
+      topRow.append(numBadge, styleBadge, platformSelect, spacer, refreshBtn, copyBtn);
+
+      // Caption body (editable)
+      const bodyDiv = document.createElement('div');
+      bodyDiv.className = 'caption-card-text caption-editable';
+      bodyDiv.contentEditable = 'true';
+      bodyDiv.textContent = cap.text || '';
+      bodyDiv.style.cssText = 'min-height:60px;border:1px solid transparent;border-radius:6px;padding:6px 8px;transition:border-color 0.2s;outline:none;white-space:pre-wrap;line-height:1.5;font-size:13px';
+      bodyDiv.addEventListener('focus', () => bodyDiv.style.borderColor = 'var(--border-focus,var(--accent,#30D158))');
+      bodyDiv.addEventListener('blur',  () => bodyDiv.style.borderColor = 'transparent');
+
+      // Hashtags (editable)
+      const tagsDiv = document.createElement('div');
+      tagsDiv.className = 'caption-card-tags caption-tags-editable';
+      tagsDiv.contentEditable = 'true';
+      tagsDiv.textContent = cap.hashtags || '';
+      tagsDiv.style.cssText = 'font-size:11px;color:var(--text-dim);margin-top:8px;border:1px solid transparent;border-radius:6px;padding:4px 8px;transition:border-color 0.2s;outline:none;white-space:pre-wrap';
+      tagsDiv.addEventListener('focus', () => tagsDiv.style.borderColor = 'var(--border-focus,var(--accent,#30D158))');
+      tagsDiv.addEventListener('blur',  () => tagsDiv.style.borderColor = 'transparent');
+
+      // Bottom row: Dropbox + rating
+      const bottomRow = document.createElement('div');
+      bottomRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap';
+
+      const dropboxInput = document.createElement('input');
+      dropboxInput.type = 'text';
+      dropboxInput.className = 'caption-dropbox-input agent-input';
+      dropboxInput.placeholder = 'Dropbox link...';
+      dropboxInput.style.cssText = 'flex:1;min-width:180px;font-size:12px;padding:5px 10px';
+
+      const thumbUp = document.createElement('button');
+      thumbUp.className = 'btn caption-rate-btn';
+      thumbUp.dataset.rating = 'up';
+      thumbUp.style.cssText = 'font-size:14px;padding:3px 10px;border-color:var(--text-dim)';
+      thumbUp.textContent = '\ud83d\udc4d';
+
+      const thumbDown = document.createElement('button');
+      thumbDown.className = 'btn caption-rate-btn';
+      thumbDown.dataset.rating = 'down';
+      thumbDown.style.cssText = 'font-size:14px;padding:3px 10px;border-color:var(--text-dim)';
+      thumbDown.textContent = '\ud83d\udc4e';
+
+      bottomRow.append(dropboxInput, thumbUp, thumbDown);
+      card.append(topRow, bodyDiv, tagsDiv, bottomRow);
+      cardsRow.appendChild(card);
+
+      // Wire copy
+      copyBtn.addEventListener('click', () => {
+        const full = bodyDiv.textContent + (tagsDiv.textContent ? '\n\n' + tagsDiv.textContent : '');
+        navigator.clipboard.writeText(full).then(() => {
+          copyBtn.textContent = '\u2713 Copied';
+          copyBtn.style.color = 'var(--green)';
+          setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.style.color = ''; }, 2200);
+        }).catch(() => toast('Copy failed', 'error'));
+      });
+
+      // Wire refresh
+      refreshBtn.addEventListener('click', async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<span class="spinner"></span>';
+        card.style.opacity = '0.6';
+        try {
+          const keyframes = _bulkKeyframes[video.videoName] || [];
+          const res = await api('/api/agents/bulk-captions/refresh-caption', {
+            method: 'POST',
+            body: {
+              username: _bulkUsername || username,
+              videoName: video.videoName,
+              keyframes,
+              currentStyle: cap.style || '',
+            },
+          });
+          bodyDiv.textContent = res.text || '';
+          tagsDiv.textContent = res.hashtags || '';
+          if (res.style) styleBadge.textContent = res.style;
+          toast('Caption refreshed', 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = '\ud83d\udd04 Refresh';
+          card.style.opacity = '1';
+        }
+      });
+
+      // Wire rating
+      [thumbUp, thumbDown].forEach(rateBtn => {
+        rateBtn.addEventListener('click', async () => {
+          if (!outputId) return;
+          const rating = rateBtn.dataset.rating;
+          const globalIndex = vi * 3 + ci;
+          try {
+            await api('/api/captions/rate', { method: 'POST', body: { outputId, captionIndex: globalIndex, rating } });
+            thumbUp.style.borderColor   = rating === 'up'   ? 'var(--green)' : 'var(--text-dim)';
+            thumbDown.style.borderColor = rating === 'down' ? 'var(--red)'   : 'var(--text-dim)';
+            thumbUp.style.color   = rating === 'up'   ? 'var(--green)' : '';
+            thumbDown.style.color = rating === 'down' ? 'var(--red)'   : '';
+          } catch (err) {
+            toast('Rating failed: ' + err.message, 'error');
+          }
+        });
+      });
     });
-  });
-}
 
+    group.appendChild(cardsRow);
+    container.appendChild(group);
+  });
+
+  // Bulk export button â€” collects live card data
+  container.querySelector('.bulk-sheets-export-wrap')?.remove();
+  const exportWrap = document.createElement('div');
+  exportWrap.className = 'bulk-sheets-export-wrap sheets-export-btn-wrap';
+  exportWrap.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px';
+
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn';
+  exportBtn.style.cssText = 'border-color:var(--green);color:var(--green);display:flex;align-items:center;gap:6px';
+  exportBtn.innerHTML = '\ud83d\udcca Export to Google Sheet';
+
+  const datePicker = document.createElement('input');
+  datePicker.type = 'date';
+  datePicker.className = 'agent-input';
+  datePicker.style.cssText = 'max-width:160px;font-size:12px;padding:6px 10px';
+  datePicker.value = new Date().toISOString().slice(0, 10);
+
+  const statusSpan = document.createElement('span');
+  statusSpan.style.cssText = 'font-size:12px;color:var(--text-sub)';
+
+  exportBtn.addEventListener('click', async () => {
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="spinner"></span> Exporting...';
+    statusSpan.textContent = '';
+    try {
+      const captionCards = container.querySelectorAll('.bulk-caption-card');
+      const captionsPayload = Array.from(captionCards).map(c => {
+        const body = c.querySelector('.caption-editable')?.textContent || '';
+        const tags = c.querySelector('.caption-tags-editable')?.textContent || '';
+        const dropboxLink = c.querySelector('.caption-dropbox-input')?.value || '';
+        const platform = c.querySelector('.caption-platform-select')?.value || '';
+        return { caption: body + (tags ? '\n\n' + tags : ''), dropboxLink, platform, category: '' };
+      }).filter(c => c.caption.trim());
+
+      const body = { captions: captionsPayload, date: datePicker.value };
+      const resolvedAccountId = accountId || _bulkAccountId;
+      if (resolvedAccountId) body.accountId = resolvedAccountId;
+      const result = await api('/api/sheets/export', { method: 'POST', body });
+      exportBtn.innerHTML = '\ud83d\udcca Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--green)">\u2713 ${result.message}</span>`;
+      toast(result.message, 'success');
+    } catch (err) {
+      exportBtn.innerHTML = '\ud83d\udcca Export to Google Sheet';
+      statusSpan.innerHTML = `<span style="color:var(--red)">\u2717 ${err.message}</span>`;
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+
+  exportWrap.append(exportBtn, datePicker, statusSpan);
+  container.appendChild(exportWrap);
+}
 function formatFileSize(bytes) {
   if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 ** 3)).toFixed(1) + ' GB';
   if (bytes >= 1024 * 1024)        return (bytes / (1024 ** 2)).toFixed(1) + ' MB';

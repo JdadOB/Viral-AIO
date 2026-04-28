@@ -908,4 +908,49 @@ Return EXACTLY this format:
   return msg.content[0].text.trim();
 }
 
-module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption };
+// ── REFRESH SINGLE BULK CAPTION ────────────────────────────────────────────
+async function refreshBulkSingleCaption({ username, videoName, keyframes = [], currentStyle = '', userId }) {
+  const account = db.prepare('SELECT * FROM accounts WHERE username = ? AND user_id = ?').get(username, userId);
+  if (!account) throw new Error(`@${username} is not in the database`);
+
+  const captions = getProfileCaptions(username, 8);
+  const captionSamples = captions.length
+    ? captions.slice(0, 5).map(c => `[ER: ${(c.engagement_rate || 0).toFixed(2)}%]\n${(c.caption || '').substring(0, 200)}`).join('\n\n---\n\n')
+    : 'No caption history available yet.';
+
+  const profile = db.prepare('SELECT * FROM creator_profiles WHERE account_id = ?').get(account.id);
+  const emojiData = profile?.emoji_fingerprint ? (() => { try { return JSON.parse(profile.emoji_fingerprint); } catch { return null; } })() : null;
+  const voiceLine = profile ? `Voice: ${profile.voice_fingerprint}` : 'No profile yet';
+
+  const ai = client();
+
+  const avoidStyle = currentStyle ? `Do NOT write another "${currentStyle}" style caption — pick something completely different.` : '';
+
+  let userContent;
+  if (keyframes.length > 0) {
+    const parts = [
+      { type: 'text', text: `Write 1 fresh caption for @${username} for the video "${videoName}". ${avoidStyle}\n\nCreator voice: ${voiceLine}\n\nBest captions (study voice):\n${captionSamples}\n${formatEmojiBlock(emojiData)}\n\nVideo keyframes:` },
+      ...keyframes.map(f => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f } })),
+      { type: 'text', text: 'Return ONLY valid JSON (no markdown): {"style": "word", "text": "caption body", "hashtags": "#tag1 #tag2"}' },
+    ];
+    userContent = parts;
+  } else {
+    userContent = `Write 1 fresh caption for @${username} for a video named "${videoName}". ${avoidStyle}\n\nCreator voice: ${voiceLine}\n\nBest captions:\n${captionSamples}\n${formatEmojiBlock(emojiData)}\n\nReturn ONLY valid JSON (no markdown): {"style": "word", "text": "caption body", "hashtags": "#tag1 #tag2"}`;
+  }
+
+  const msg = await ai.messages.create({
+    model: MODEL,
+    max_tokens: 600,
+    system: `You are the Writer — write ONE caption for a creator's video in their exact voice. Respond ONLY with valid JSON, no markdown: {"style": "word", "text": "...", "hashtags": "..."}`,
+    messages: [{ role: 'user', content: userContent }],
+  });
+
+  let raw = msg.content[0].text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { style: 'refreshed', text: raw, hashtags: '' };
+  }
+}
+
+module.exports = { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption, refreshBulkSingleCaption };
