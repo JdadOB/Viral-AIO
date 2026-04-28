@@ -130,8 +130,11 @@ try { db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'client'"); } catc
 db.prepare("UPDATE users SET role = 'admin' WHERE is_admin = 1 AND (role IS NULL OR role = 'client')").run();
 db.prepare("UPDATE users SET role = 'client' WHERE role IS NULL").run();
 
-// Ensure the operator account is always an admin
-db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE email = 'jonadkins03@gmail.com'").run();
+// Promote operator email to admin if configured via environment variable
+const OPERATOR_EMAIL = process.env.OPERATOR_ADMIN_EMAIL;
+if (OPERATOR_EMAIL) {
+  db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE email = ?").run(OPERATOR_EMAIL);
+}
 
 // ── RBAC: manager → client assignments ───────────────────────────────────────
 db.exec(`
