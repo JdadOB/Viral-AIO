@@ -11,14 +11,16 @@
     }
   }
 })();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-const https   = require('https');
-const http    = require('http');
-const session = require('express-session');
-const bcrypt  = require('bcryptjs');
-const passport = require('./auth');
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
+const https     = require('https');
+const http      = require('http');
+const session   = require('express-session');
+const bcrypt    = require('bcryptjs');
+const helmet    = require('helmet');
+const rateLimit = require('express-rate-limit');
+const passport  = require('./auth');
 
 const { db, getSetting, setSetting, getUserSetting, setUserSetting, seedUserDefaults } = require('./db');
 
@@ -64,19 +66,41 @@ const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler 
 const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption, refreshBulkSingleCaption } = require('./agents');
 
 const app = express();
-app.use(cors());
+const SESSION_SECRET = (() => {
+  const s = process.env.SESSION_SECRET;
+  if (!s || s.length < 32) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SESSION_SECRET env var must be set and at least 32 characters');
+    }
+    console.warn('[Security] SESSION_SECRET not set — using a random ephemeral secret (sessions will not survive restarts)');
+    return require('crypto').randomBytes(32).toString('hex');
+  }
+  return s;
+})();
+
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN, credentials: true } : false));
 app.use(express.json({ limit: '50mb' }));
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'viral-track-secret-change-in-prod',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   store: new SQLiteStore(),
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 },
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  },
 }));
+app.use(helmet({ contentSecurityPolicy: false })); // CSP disabled — app uses inline scripts; tighten later
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(buildScopeMiddleware());
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const agentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
 
 function requireAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -153,9 +177,9 @@ app.get('/login', (req, res) => {
 });
 
 // Registration is admin-only — no public sign-up
-app.post('/auth/register', (req, res) => res.status(403).json({ error: 'Registration is disabled. Contact the administrator.' }));
+app.post('/auth/register', authLimiter, (req, res) => res.status(403).json({ error: 'Registration is disabled. Contact the administrator.' }));
 
-app.post('/auth/login', (req, res, next) => {
+app.post('/auth/login', authLimiter, (req, res, next) => {
   passport.authenticate('local', (err, user, info) => {
     if (err) return next(err);
     if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
@@ -201,7 +225,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
   if (!['admin', 'manager', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
   if (existing) return res.status(409).json({ error: 'Email already registered' });
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, 12);
   const isAdmin = role === 'admin' ? 1 : 0;
   const { lastInsertRowid } = db.prepare(
     'INSERT INTO users (email, password_hash, name, role, is_admin) VALUES (?, ?, ?, ?, ?)'
@@ -225,10 +249,12 @@ app.patch('/api/admin/users/:id/role', requireAdmin, (req, res) => {
 });
 
 app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
-  const targetId = parseInt(req.params.id);
+  const targetId = parseInt(req.params.id, 10);
   if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
   const target = db.prepare('SELECT name FROM users WHERE id = ?').get(targetId);
   db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  // Invalidate any active sessions for the deleted user
+  db.prepare("DELETE FROM sessions WHERE json_extract(sess, '$.passport.user') = ?").run(targetId);
   logActivity(req.user.id, req.user.name, userRole(req.user), 'user_deleted', { userId: targetId, userName: target?.name });
   res.json({ success: true });
 });
@@ -547,17 +573,24 @@ app.delete('/api/alerts/acted-on', requireAuth, (req, res) => {
 
 app.post('/api/alerts/:id/brief', requireAuth, async (req, res) => {
   try {
-    const brief = await generateBrief(parseInt(req.params.id));
+    const alertId = parseInt(req.params.id, 10);
+    const owned = db.prepare(`
+      SELECT al.id FROM alerts al
+      JOIN accounts acc ON al.account_id = acc.id
+      WHERE al.id = ? AND acc.user_id = ?
+    `).get(alertId, req.scopedUserId);
+    if (!owned) return res.status(404).json({ error: 'Not found' });
+    const brief = await generateBrief(alertId);
     res.json(brief);
   } catch (err) {
     console.error('[Brief]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to generate brief' });
   }
 });
 
 // ── Browser Scrape (for age-restricted / private accounts) ────────────────────
 
-app.post('/api/browser-scrape', requireAuth, (req, res) => {
+app.post('/api/browser-scrape', requireManager, (req, res) => {
   const { username, followers_count, full_name, profile_pic_url, posts } = req.body;
   if (!username || !Array.isArray(posts) || posts.length === 0)
     return res.status(400).json({ error: 'username and posts[] required' });
@@ -604,7 +637,7 @@ app.post('/api/poll', requireManager, (req, res) => {
   pollAllAccounts().catch(console.error);
 });
 
-app.get('/api/google-configured', (_req, res) => {
+app.get('/api/google-configured', requireAuth, (_req, res) => {
   res.json({ configured: !!process.env.GOOGLE_CLIENT_ID });
 });
 
@@ -617,11 +650,13 @@ app.get('/api/img', (req, res) => {
   let parsed;
   try { parsed = new URL(url); } catch { return res.status(400).end(); }
 
-  const allowed = ['instagram.com', 'cdninstagram.com', 'fbcdn.net', 'scontent.cdninstagram.com'];
-  if (!allowed.some(d => parsed.hostname.endsWith(d))) return res.status(403).end();
+  if (parsed.protocol !== 'https:') return res.status(400).end();
 
-  const lib = parsed.protocol === 'https:' ? https : http;
-  const request = lib.get(url, {
+  const allowed = ['instagram.com', 'cdninstagram.com', 'fbcdn.net', 'scontent.cdninstagram.com'];
+  const domainAllowed = d => parsed.hostname === d || parsed.hostname.endsWith('.' + d);
+  if (!allowed.some(domainAllowed)) return res.status(403).end();
+
+  const request = https.get(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://www.instagram.com/',
@@ -690,7 +725,7 @@ app.post('/api/discord/test', requireAuth, async (req, res) => {
 
 // ── Agents ────────────────────────────────────────────────────────────────────
 
-app.post('/api/agents/strategist', requireAuth, async (req, res) => {
+app.post('/api/agents/strategist', requireAuth, agentLimiter, async (req, res) => {
   try {
     const { days = 7 } = req.body;
     logActivity(req.user.id, req.user.name, userRole(req.user), 'agent_run', { agent: 'strategist', scopedUserId: req.scopedUserId });
@@ -702,7 +737,7 @@ app.post('/api/agents/strategist', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/agents/writer', requireAuth, async (req, res) => {
+app.post('/api/agents/writer', requireAuth, agentLimiter, async (req, res) => {
   try {
     const { username, contentGoal, viralCaption } = req.body;
     if (!username) return res.status(400).json({ error: 'username required' });
@@ -774,7 +809,7 @@ app.get('/api/captions/history/:username', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/agents/assistant', requireAuth, async (req, res) => {
+app.post('/api/agents/assistant', requireAuth, agentLimiter, async (req, res) => {
   try {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: 'question required' });
@@ -786,23 +821,23 @@ app.post('/api/agents/assistant', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/agents/captain', requireAuth, async (req, res) => {
+app.post('/api/agents/captain', requireAuth, agentLimiter, async (req, res) => {
   try {
     const { outputId } = req.body;
     if (!outputId) return res.status(400).json({ error: 'outputId required' });
-    const row = db.prepare('SELECT * FROM agent_outputs WHERE id = ?').get(outputId);
+    const row = db.prepare('SELECT * FROM agent_outputs WHERE id = ? AND user_id = ?').get(outputId, req.scopedUserId);
     if (!row) return res.status(404).json({ error: 'Output not found' });
     const captain = await runCaptain(row.agent, row.reviewed_output || row.raw_output);
-    db.prepare('UPDATE agent_outputs SET reviewed_output = ?, captain_notes = ? WHERE id = ?')
-      .run(captain.reviewed, captain.notes, outputId);
+    db.prepare('UPDATE agent_outputs SET reviewed_output = ?, captain_notes = ? WHERE id = ? AND user_id = ?')
+      .run(captain.reviewed, captain.notes, outputId, req.scopedUserId);
     res.json({ ...captain, id: outputId });
   } catch (err) {
     console.error('[Agent:Captain]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Agent failed' });
   }
 });
 
-app.post('/api/agents/ideator', requireAuth, async (req, res) => {
+app.post('/api/agents/ideator', requireAuth, agentLimiter, async (req, res) => {
   try {
     const { group } = req.body;
     const result = await runIdeator({ group: group || null, userId: req.scopedUserId });
@@ -861,7 +896,7 @@ app.delete('/api/brain/profiles/:accountId', requireManager, (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/brain/build', requireManager, async (req, res) => {
+app.post('/api/brain/build', requireManager, agentLimiter, async (req, res) => {
   const { accountId } = req.body;
   const uid = req.scopedUserId;
   logActivity(req.user.id, req.user.name, userRole(req.user), 'brain_build', { accountId: accountId || 'all', scopedUserId: uid });
@@ -1043,6 +1078,7 @@ app.post('/api/chat/rooms/:roomId/messages', requireAuth, (req, res) => {
     return res.status(404).json({ error: 'Not found' });
   const body = (req.body.body || '').trim();
   if (!body) return res.status(400).json({ error: 'Message cannot be empty' });
+  if (body.length > 4000) return res.status(400).json({ error: 'Message too long (max 4000 characters)' });
 
   const { lastInsertRowid: msgId } = db.prepare(
     'INSERT INTO messages (room_id, sender_id, body) VALUES (?, ?, ?)'
@@ -1141,11 +1177,16 @@ app.delete('/api/content/:id', requireManager, (req, res) => {
 // ── Google Sheets Integration ───────────────────────────────────────────────
 try {
   require('./sheets-routes')(app, { requireAuth, requireManager, db, getUserSetting, setUserSetting, userRole, logActivity });
-require('./stripe-routes')(app, { db, requireAuth, requireAdmin, logActivity, userRole });
+  require('./stripe-routes')(app, { db, requireAuth, requireAdmin, logActivity, userRole });
   console.log('[Sheets] Google Sheets routes mounted');
 } catch (e) {
   console.warn('[Sheets] Routes not loaded:', e.message);
 }
+
+// Purge expired sessions every hour
+setInterval(() => {
+  try { db.prepare('DELETE FROM sessions WHERE expired < ?').run(Date.now()); } catch {}
+}, 60 * 60 * 1000);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

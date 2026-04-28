@@ -439,7 +439,7 @@ function alertCardHTML(a) {
             ${!hasBrief
               ? `<button class="btn btn-magenta" data-action="brief" data-id="${a.id}">Generate Brief</button>`
               : `<button class="btn btn-cyan" data-action="toggle-brief" data-id="${a.id}">View Brief</button>`}
-            ${a.post_url ? `<a class="btn btn-dim" href="${a.post_url}" target="_blank">View Post</a>` : ''}
+            ${(a.post_url && /^https:\/\//i.test(a.post_url)) ? `<a class="btn btn-dim" href="${escapeHtml(a.post_url)}" target="_blank" rel="noopener noreferrer">View Post</a>` : ''}
             ${!a.acted_on
               ? `<button class="btn btn-green" data-action="act" data-id="${a.id}">Mark Actioned</button>`
               : `<button class="btn btn-dim" data-action="dismiss" data-id="${a.id}">Dismiss</button>`}
@@ -1192,7 +1192,7 @@ function showOutputModal(title, output, captainNotes) {
     $('#output-modal-body').innerHTML += `
       <div class="captain-notes">
         <div class="captain-notes-label">Captain's Notes</div>
-        ${captainNotes}
+        ${renderMarkdown(captainNotes)}
       </div>`;
   }
   overlay.classList.remove('hidden');
@@ -1436,7 +1436,7 @@ function loadAgentHistory() {
     el.innerHTML = rows.map(r => `
       <div class="history-item" data-id="${r.id}" data-agent="${r.agent}">
         <span class="history-agent ha-${r.agent}">${r.agent}</span>
-        <span class="history-summary">${r.input_summary || '—'}</span>
+        <span class="history-summary">${escapeHtml(r.input_summary || '—')}</span>
         <span class="history-time">${timeAgo(r.created_at)}</span>
       </div>
     `).join('');
@@ -2363,14 +2363,14 @@ function showBrainNodeProfile(profile) {
         <div style="font-size:12px;color:var(--text-dim)">${(profile.followers_count || 0).toLocaleString()} followers · ${profile.group_name || 'Default'}</div>
       </div>
     </div>
-    ${profile.strength_summary ? `<div class="brain-strength" style="margin-bottom:16px">${profile.strength_summary}</div>` : ''}
-    ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${pillars.map(t => `<span class="brain-pillar">${t}</span>`).join('')}</div>` : ''}
-    <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${profile.voice_fingerprint || '—'}</div></div>
-    <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${profile.audience_triggers || '—'}</div></div>
-    <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${profile.niche_positioning || '—'}</div></div>
-    <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${profile.visual_style || '—'}</div></div>
+    ${profile.strength_summary ? `<div class="brain-strength" style="margin-bottom:16px">${escapeHtml(profile.strength_summary)}</div>` : ''}
+    ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${pillars.map(t => `<span class="brain-pillar">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+    <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${escapeHtml(profile.voice_fingerprint || '—')}</div></div>
+    <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${escapeHtml(profile.audience_triggers || '—')}</div></div>
+    <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${escapeHtml(profile.niche_positioning || '—')}</div></div>
+    <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${escapeHtml(profile.visual_style || '—')}</div></div>
     ${emojiSection}
-    ${profile.discovery_brief ? `<details class="brain-discovery" style="margin-top:12px"><summary>Find Similar</summary><div class="brain-value" style="margin-top:8px">${profile.discovery_brief}</div></details>` : ''}
+    ${profile.discovery_brief ? `<details class="brain-discovery" style="margin-top:12px"><summary>Find Similar</summary><div class="brain-value" style="margin-top:8px">${escapeHtml(profile.discovery_brief)}</div></details>` : ''}
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn" style="flex:1;font-size:12px;background:var(--bg-3);border-color:var(--border-strong);color:var(--text-sub)" onclick="rebuildProfile(${profile.account_id})">Rebuild</button>
       <button class="btn btn-danger" style="flex:1;font-size:12px" onclick="removeProfile(${profile.account_id},'${profile.username}')">Remove</button>
@@ -2652,8 +2652,8 @@ async function renderBrain() {
                     <div style="font-size:12px;color:var(--text-dim)">${(p.followers_count||0).toLocaleString()} followers · ${p.group_name||'Ungrouped'}</div>
                   </div>
                 </div>
-                <div style="font-size:12px;color:var(--cyan);background:var(--cyan-soft);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;line-height:1.5">${p.relevance_reason}</div>
-                ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
+                <div style="font-size:12px;color:var(--cyan);background:var(--cyan-soft);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;line-height:1.5">${escapeHtml(p.relevance_reason || '')}</div>
+                ${p.strength_summary ? `<div class="brain-strength">${escapeHtml(p.strength_summary)}</div>` : ''}
                 ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${pillars.map(t => `<span class="brain-pillar">${t}</span>`).join('')}</div>` : ''}
               </div>`;
             }).join('')}
@@ -2730,13 +2730,13 @@ async function loadBrainProfiles() {
             <button class="btn" style="padding:4px 10px;font-size:11px;background:var(--red-soft);color:var(--red);border:1px solid rgba(255,69,58,0.25)" onclick="removeProfile(${p.account_id}, '${p.username}')">Remove</button>
           </div>
         </div>
-        ${p.strength_summary ? `<div class="brain-strength">${p.strength_summary}</div>` : ''}
-        ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${pillars.map(tag => `<span class="brain-pillar">${tag}</span>`).join('')}</div>` : ''}
-        <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${p.voice_fingerprint || '—'}</div></div>
-        <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${p.audience_triggers || '—'}</div></div>
-        <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${p.niche_positioning || '—'}</div></div>
-        <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${p.visual_style || '—'}</div></div>
-        <details class="brain-discovery"><summary>Find Similar Creators</summary><div class="brain-value" style="margin-top:8px">${p.discovery_brief || '—'}</div></details>
+        ${p.strength_summary ? `<div class="brain-strength">${escapeHtml(p.strength_summary)}</div>` : ''}
+        ${pillars.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${pillars.map(tag => `<span class="brain-pillar">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+        <div class="brain-section"><div class="brain-label">Voice</div><div class="brain-value">${escapeHtml(p.voice_fingerprint || '—')}</div></div>
+        <div class="brain-section"><div class="brain-label">Audience Triggers</div><div class="brain-value">${escapeHtml(p.audience_triggers || '—')}</div></div>
+        <div class="brain-section"><div class="brain-label">Niche Position</div><div class="brain-value">${escapeHtml(p.niche_positioning || '—')}</div></div>
+        <div class="brain-section"><div class="brain-label">Visual Style</div><div class="brain-value">${escapeHtml(p.visual_style || '—')}</div></div>
+        <details class="brain-discovery"><summary>Find Similar Creators</summary><div class="brain-value" style="margin-top:8px">${escapeHtml(p.discovery_brief || '—')}</div></details>
         <div style="font-size:10px;color:var(--text-dim);margin-top:10px;text-align:right">Built ${timeAgo(p.built_at)}</div>
       </div>`;
     }).join('');
@@ -3016,11 +3016,11 @@ async function loadAdminUsers() {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:14px;font-weight:500;color:var(--text-main)">${u.name}</span>
+              <span style="font-size:14px;font-weight:500;color:var(--text-main)">${escapeHtml(u.name)}</span>
               ${rolePill(role)}
               ${role === 'manager' ? `<span style="font-size:10px;color:var(--text-dim)">${u.client_count}/10 clients</span>` : ''}
             </div>
-            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${u.email} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${escapeHtml(u.email || '')} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             ${isSelf ? '<span style="font-size:11px;color:var(--text-dim)">You</span>' : `
@@ -3125,9 +3125,9 @@ async function loadActivityLog() {
         const details = l.details ? (() => { try { return JSON.stringify(JSON.parse(l.details), null, 0).replace(/[{}]/g,'').replace(/"/g,''); } catch { return l.details; } })() : '';
         return `<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);align-items:baseline">
           <span style="color:var(--text-dim);white-space:nowrap;flex-shrink:0">${l.created_at?.replace('T',' ').substring(0,16) || ''}</span>
-          <span style="color:${c};flex-shrink:0;font-weight:700">${(l.user_name||'system').substring(0,14)}</span>
-          <span style="color:var(--text-main)">${l.action}</span>
-          ${details ? `<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${details}</span>` : ''}
+          <span style="color:${c};flex-shrink:0;font-weight:700">${escapeHtml((l.user_name||'system').substring(0,14))}</span>
+          <span style="color:var(--text-main)">${escapeHtml(l.action || '')}</span>
+          ${details ? `<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(details)}</span>` : ''}
         </div>`;
       }).join('') + '</div>';
   } catch {
@@ -3199,12 +3199,14 @@ async function loadChatRooms() {
 
     function roomItem(peerId, name, room) {
       const unread = room?.unread_count || 0;
-      const preview = room?.last_message ? room.last_message.substring(0, 36) + (room.last_message.length > 36 ? '…' : '') : 'Start a conversation';
+      const rawPreview = room?.last_message ? room.last_message.substring(0, 36) + (room.last_message.length > 36 ? '…' : '') : 'Start a conversation';
+      const preview = escapeHtml(rawPreview);
+      const safeName = escapeHtml(name);
       const active = chatState.roomId && room?.id === chatState.roomId ? ' active' : '';
-      return `<div class="chat-room-item${active}" data-peer="${peerId}" data-name="${name}" onclick="openRoom(${peerId}, '${name.replace(/'/g, "\\'")}')">
+      return `<div class="chat-room-item${active}" data-peer="${peerId}" data-name="${safeName}" onclick="openRoom(${peerId}, '${name.replace(/'/g, "\\'").replace(/</g, '').replace(/>/g, '')}')">
         <div class="chat-room-avatar">${initials(name)}</div>
         <div class="chat-room-info">
-          <div class="chat-room-name">${name} ${unread ? `<span class="chat-unread-dot">${unread}</span>` : ''}</div>
+          <div class="chat-room-name">${safeName} ${unread ? `<span class="chat-unread-dot">${unread}</span>` : ''}</div>
           <div class="chat-room-preview">${preview}</div>
         </div>
       </div>`;
@@ -3250,7 +3252,7 @@ async function openRoom(peerId, peerName) {
   main.innerHTML = `
     <div class="chat-header">
       <div class="chat-header-avatar">${initials(peerName)}</div>
-      <div class="chat-header-name">${peerName}</div>
+      <div class="chat-header-name">${escapeHtml(peerName)}</div>
     </div>
     <div class="chat-messages" id="chat-messages"></div>
     <div class="chat-input-bar">
@@ -3303,10 +3305,6 @@ async function loadMessages(roomId, since = 0) {
     chatState.lastId = msgs[msgs.length - 1].id;
     container.scrollTop = container.scrollHeight;
   } catch { /* network error — silently skip */ }
-}
-
-function escapeHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function sendChatMessage() {
