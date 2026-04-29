@@ -3,4 +3,11 @@ node_modules/
 *.db-shm
 *.db-wal
 .env
+.env.local
+output/
 frontend/node_modules/
+.git/
+.github/
+terraform/
+fly.toml
+*.md

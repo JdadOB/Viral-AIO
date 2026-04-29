@@ -81,7 +81,7 @@ const SESSION_SECRET = (() => {
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN, credentials: true } : false));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '1mb' }));
 
 app.use(session({
   secret: SESSION_SECRET,
@@ -167,6 +167,9 @@ function logActivity(userId, userName, role, action, details = null) {
       .run(userId || null, userName || null, role || null, action, details ? JSON.stringify(details) : null);
   } catch (e) { /* non-critical */ }
 }
+
+// Health check — used by Docker HEALTHCHECK and AWS load balancers
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // Serve static assets without auth (CSS, JS, etc.)
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
@@ -331,7 +334,8 @@ app.get('/api/admin/logs', requireAdmin, (req, res) => {
 app.post('/api/waitlist', (req, res) => {
   try {
     const { email } = req.body;
-    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email required' });
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !emailRe.test(email)) return res.status(400).json({ error: 'Valid email required' });
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run('waitlist_' + Date.now() + '_' + Math.random().toString(36).slice(2), email);
     console.log('[Waitlist]', email);
     res.json({ success: true });
@@ -591,7 +595,7 @@ app.post('/api/alerts/:id/brief', requireAuth, async (req, res) => {
 
 // ── Browser Scrape (for age-restricted / private accounts) ────────────────────
 
-app.post('/api/browser-scrape', requireManager, (req, res) => {
+app.post('/api/browser-scrape', requireManager, express.json({ limit: '10mb' }), (req, res) => {
   const { username, followers_count, full_name, profile_pic_url, posts } = req.body;
   if (!username || !Array.isArray(posts) || posts.length === 0)
     return res.status(400).json({ error: 'username and posts[] required' });

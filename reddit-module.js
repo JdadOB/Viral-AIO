@@ -1,8 +1,6 @@
-// reddit.js â€” Reddit prospect finder + reply drafter
+// reddit.js — Reddit prospect finder + reply drafter
 const axios = require('axios');
 const { draftRedditReply } = require('./outreach-drafter');
-const fs = require('fs');
-const path = require('path');
 
 const SUBREDDITS = [
   'onlyfansadvice',
@@ -61,8 +59,14 @@ async function getRedditToken() {
   const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD } = process.env;
   if (!REDDIT_CLIENT_ID) throw new Error('Reddit credentials not configured in .env');
 
+  const params = new URLSearchParams({
+    grant_type: 'password',
+    username: REDDIT_USERNAME,
+    password: REDDIT_PASSWORD,
+  });
+
   const res = await axios.post('https://www.reddit.com/api/v1/access_token',
-    `grant_type=password&username=${REDDIT_USERNAME}&password=${REDDIT_PASSWORD}`,
+    params.toString(),
     {
       auth: { username: REDDIT_CLIENT_ID, password: REDDIT_CLIENT_SECRET },
       headers: { 'User-Agent': 'ViralTrackOutreach/1.0' },
@@ -83,13 +87,13 @@ async function fetchSubredditPosts(token, subreddit, limit = 25) {
 }
 
 async function scanReddit() {
-  console.log('ðŸ” Scanning Reddit for prospects...\n');
+  console.log('[Reddit] Scanning for prospects...');
 
   let token;
   try {
     token = await getRedditToken();
   } catch (e) {
-    console.log('âš ï¸  No Reddit credentials â€” running in demo mode (public API)\n');
+    console.log('[Reddit] No credentials — using public API (rate limited)');
   }
 
   const prospects = [];
@@ -128,44 +132,28 @@ async function scanReddit() {
       // Rate limit respect
       await new Promise(r => setTimeout(r, 600));
     } catch (e) {
-      console.error(`  âŒ r/${sub}: ${e.message}`);
+      console.error(`[Reddit] r/${sub}: ${e.message}`);
     }
   }
 
   // Sort by score desc
   prospects.sort((a, b) => b.score - a.score);
 
-  console.log(`âœ… Found ${prospects.length} prospects\n`);
+  console.log(`[Reddit] Found ${prospects.length} prospects`);
 
-  if (!prospects.length) {
-    console.log('No prospects found. Try again later or broaden keywords.');
-    return [];
-  }
+  if (!prospects.length) return [];
 
   // Draft replies for top 10
   const top = prospects.slice(0, 10);
-  console.log('âœï¸  Drafting replies...\n');
-
   const results = [];
   for (const p of top) {
     try {
       const draft = await draftRedditReply(p);
       results.push({ ...p, draft });
-      console.log(`ðŸ“ r/${p.subreddit} â€” Score: ${p.score}`);
-      console.log(`   Title: ${p.title.substring(0, 80)}`);
-      console.log(`   URL: ${p.url}`);
-      console.log(`   Draft:\n   ${draft.replace(/\n/g, '\n   ')}`);
-      console.log('');
     } catch (e) {
-      console.error(`  Draft failed: ${e.message}`);
+      console.error(`[Reddit] Draft failed for "${p.title.substring(0, 40)}": ${e.message}`);
     }
   }
-
-  // Save to file
-  const outFile = path.join(__dirname, 'output', `reddit-${Date.now()}.json`);
-  fs.mkdirSync(path.join(__dirname, 'output'), { recursive: true });
-  fs.writeFileSync(outFile, JSON.stringify(results, null, 2));
-  console.log(`\nðŸ’¾ Saved to ${outFile}`);
 
   return results;
 }

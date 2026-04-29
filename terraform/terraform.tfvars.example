@@ -1,0 +1,28 @@
+# Copy this file to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region = "us-east-1"
+app_name   = "viral-aio"
+app_url    = "https://app.example.com"
+
+# Secrets — consider storing these in AWS Secrets Manager instead of here.
+# See the "secrets" block in main.tf for the Secrets Manager approach.
+session_secret     = "change_me_to_64_random_chars"
+anthropic_api_key  = "sk-ant-..."
+apify_token        = ""
+stripe_secret_key  = "sk_live_..."
+stripe_webhook_secret = "whsec_..."
+
+operator_admin_email = "admin@example.com"
+
+# Optional integrations
+google_client_id              = ""
+google_client_secret          = ""
+google_callback_url           = ""
+google_service_account_json   = ""
+discord_bot_token             = ""
+instagram_session_id          = ""
+reddit_client_id              = ""
+reddit_client_secret          = ""
+reddit_username               = ""
+reddit_password               = ""
