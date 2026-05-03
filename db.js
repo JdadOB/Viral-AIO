@@ -290,6 +290,63 @@ try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_col_map TEXT'); } catch (e
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
 
+// ── Migrate accounts: username uniqueness from global → per-user ──────────────
+// The original schema had `username TEXT UNIQUE` (globally unique). We need
+// UNIQUE(username, user_id) so different managers can track the same account.
+try {
+  const tableRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'").get();
+  if (tableRow && tableRow.sql.includes('username TEXT UNIQUE')) {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE accounts_new (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        username            TEXT NOT NULL,
+        full_name           TEXT,
+        followers_count     INTEGER DEFAULT 0,
+        avg_engagement_rate REAL DEFAULT 0,
+        group_name          TEXT DEFAULT 'Default',
+        profile_pic_url     TEXT,
+        created_at          TEXT DEFAULT (datetime('now')),
+        last_polled_at      TEXT,
+        last_viral_at       TEXT,
+        user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        sheets_sheet_id     TEXT,
+        sheets_tab_mode     TEXT DEFAULT 'date',
+        sheets_manual_tab   TEXT,
+        last_scan_status    TEXT DEFAULT 'ok',
+        last_scan_error     TEXT,
+        sheets_col_map      TEXT,
+        UNIQUE(username, user_id)
+      )
+    `);
+    db.exec(`
+      INSERT INTO accounts_new
+        (id, username, full_name, followers_count, avg_engagement_rate,
+         group_name, profile_pic_url, created_at, last_polled_at, last_viral_at,
+         user_id, sheets_sheet_id, sheets_tab_mode, sheets_manual_tab,
+         last_scan_status, last_scan_error, sheets_col_map)
+      SELECT
+        id, username, full_name, followers_count, avg_engagement_rate,
+        group_name, profile_pic_url, created_at, last_polled_at, last_viral_at,
+        user_id, sheets_sheet_id, sheets_tab_mode, sheets_manual_tab,
+        last_scan_status, last_scan_error, sheets_col_map
+      FROM accounts
+    `);
+    db.exec('DROP TABLE accounts');
+    db.exec('ALTER TABLE accounts_new RENAME TO accounts');
+    db.exec('COMMIT');
+    console.log('[DB] Migrated accounts: username uniqueness is now per-user');
+  }
+} catch (e) {
+  try { db.exec('ROLLBACK'); } catch (_) {}
+  console.warn('[DB] accounts username migration warning:', e.message);
+}
+
+// ── Core query indexes ────────────────────────────────────────────────────────
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_user_id  ON accounts(user_id)'); } catch (e) {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_posts_account_id  ON posts(account_id)'); } catch (e) {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_alerts_account_id ON alerts(account_id)'); } catch (e) {}
+
 // ── Caption ratings ─────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS caption_ratings (
