@@ -1,0 +1,24 @@
+name: Copy MTG App to MTG Repo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copy-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mtg-app branch from Viral-AIO
+        uses: actions/checkout@v4
+        with:
+          repository: JdadOB/Viral-AIO
+          ref: mtg-app
+          token: ${{ secrets.MTG_REPO_TOKEN }}
+
+      - name: Push all files to MTG repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add mtg https://x-access-token:${{ secrets.MTG_REPO_TOKEN }}@github.com/JdadOB/MTG.git
+          git push mtg HEAD:main --force
+        env:
+          MTG_REPO_TOKEN: ${{ secrets.MTG_REPO_TOKEN }}
