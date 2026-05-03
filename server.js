@@ -62,7 +62,7 @@ class SQLiteStore extends session.Store {
 const { scrapeAccountPosts }         = require('./apify');
 const { processNewPosts }            = require('./detector');
 const { generateBrief }              = require('./brief');
-const { pollAllAccounts, setupScheduler, restartScheduler, setupDigestScheduler } = require('./scheduler');
+const { pollAllAccounts, setupScheduler, restartScheduler, restartSchedulerForUser, setupDigestScheduler } = require('./scheduler');
 const { runStrategist, runWriter, runAssistant, runCaptain, runIdeator, runProfileBuilder, runBulkCaptions, runIdeatorV2, refreshSingleCaption, refreshBulkSingleCaption } = require('./agents');
 
 const app = express();
@@ -232,6 +232,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
     'INSERT INTO users (email, password_hash, name, role, is_admin) VALUES (?, ?, ?, ?, ?)'
   ).run(email.toLowerCase().trim(), hash, name.trim(), role, isAdmin);
   seedUserDefaults(lastInsertRowid);
+  restartSchedulerForUser(lastInsertRowid);
   logActivity(req.user.id, req.user.name, userRole(req.user), 'user_created', { newUser: name.trim(), role });
   res.json({ success: true, id: lastInsertRowid });
 });
@@ -714,6 +715,7 @@ app.post('/api/settings', requireManager, (req, res) => {
   if (discord_channel_id    !== undefined) setUserSetting(uid, 'discord_channel_id',    discord_channel_id);
   if (discord_digest_enabled !== undefined) setUserSetting(uid, 'discord_digest_enabled', discord_digest_enabled ? '1' : '0');
   if (discord_digest_time    !== undefined) setUserSetting(uid, 'discord_digest_time',    discord_digest_time);
+  if (polling_interval_minutes) restartSchedulerForUser(uid);
   res.json({ success: true });
 });
 
