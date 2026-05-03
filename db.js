@@ -280,6 +280,12 @@ try { db.exec("ALTER TABLE accounts ADD COLUMN sheets_tab_mode TEXT DEFAULT 'dat
 try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_manual_tab TEXT'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }
+try { db.exec("ALTER TABLE accounts ADD COLUMN last_scan_status TEXT DEFAULT 'ok'"); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
+try { db.exec('ALTER TABLE accounts ADD COLUMN last_scan_error TEXT'); } catch (e) {
+  if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
+}
 try { db.exec('ALTER TABLE accounts ADD COLUMN sheets_col_map TEXT'); } catch (e) {
   if (!e.message.includes('duplicate column')) console.warn('[DB] Migration warning:', e.message);
 }

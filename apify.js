@@ -13,14 +13,16 @@ function sessionCookies() {
   ];
 }
 
-async function scrapeAccountPosts(username) {
+// limit: 30 for initial scrape, 5 for recurring polls
+// parentData: true only for initial scrape (fetches follower count / profile metadata)
+async function scrapeAccountPosts(username, { limit = 5, parentData = false } = {}) {
   const client = getClient();
 
   const input = {
     directUrls: [`https://www.instagram.com/${username}/`],
     resultsType: 'posts',
-    resultsLimit: 30,
-    addParentData: true,
+    resultsLimit: limit,
+    addParentData: parentData,
   };
 
   const cookies = sessionCookies();
@@ -31,21 +33,4 @@ async function scrapeAccountPosts(username) {
   return dataset?.items ?? [];
 }
 
-async function getAccountProfile(username) {
-  const client = getClient();
-
-  const input = {
-    directUrls: [`https://www.instagram.com/${username}/`],
-    resultsType: 'details',
-    resultsLimit: 1,
-  };
-
-  const cookies = sessionCookies();
-  if (cookies) input.loginCookies = cookies;
-
-  const run = await client.actor('apify/instagram-scraper').call(input);
-  const dataset = await client.dataset(run.defaultDatasetId).listItems();
-  return dataset?.items?.[0] ?? null;
-}
-
-module.exports = { scrapeAccountPosts, getAccountProfile };
+module.exports = { scrapeAccountPosts };

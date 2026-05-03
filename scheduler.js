@@ -37,15 +37,26 @@ async function maybeUpdateBrain(account) {
 }
 
 async function pollAccount(account) {
+  // Skip if polled very recently — prevents double-billing when manual and scheduled polls overlap
+  if (account.last_polled_at) {
+    const minsAgo = (Date.now() - new Date(account.last_polled_at).getTime()) / 60000;
+    if (minsAgo < 10) {
+      console.log(`[Poll] Skipping @${account.username} — polled ${minsAgo.toFixed(1)}m ago`);
+      return [];
+    }
+  }
+
   try {
     console.log(`[Poll] Scraping @${account.username}...`);
     const posts = await scrapeAccountPosts(account.username);
     if (!posts.length) {
       console.log(`[Poll] No posts returned for @${account.username}`);
+      db.prepare("UPDATE accounts SET last_scan_status = 'ok', last_scan_error = NULL WHERE id = ?").run(account.id);
       return [];
     }
     const alerts = processNewPosts(account.id, posts);
     console.log(`[Poll] @${account.username}: ${posts.length} posts, ${alerts.length} new alert(s)`);
+    db.prepare("UPDATE accounts SET last_scan_status = 'ok', last_scan_error = NULL WHERE id = ?").run(account.id);
 
     maybeUpdateBrain(account).catch(e =>
       console.warn(`[Brain] Background update error for @${account.username}:`, e.message)
@@ -54,6 +65,7 @@ async function pollAccount(account) {
     return alerts;
   } catch (err) {
     console.error(`[Poll] Failed for @${account.username}:`, err.message);
+    db.prepare('UPDATE accounts SET last_scan_status = ?, last_scan_error = ? WHERE id = ?').run('failed', err.message, account.id);
     return [];
   }
 }

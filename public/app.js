@@ -886,8 +886,11 @@ function targetPodHTML(a) {
       </div>
       <div class="pod-footer">
         <span class="pod-group">${(a.group_name||'Default')}</span>
-        <span class="pod-poll ${!a.last_polled_at ? 'never' : ''}">
-          ${a.last_polled_at ? 'Scanned ' + timeAgo(a.last_polled_at) : 'Awaiting scan'}
+        <span class="pod-poll ${a.last_scan_status === 'failed' ? 'error' : !a.last_polled_at ? 'never' : ''}"
+              title="${a.last_scan_status === 'failed' ? (a.last_scan_error || 'Scan failed') : ''}">
+          ${a.last_scan_status === 'failed'
+            ? '⚠ Scan failed'
+            : a.last_polled_at ? 'Scanned ' + timeAgo(a.last_polled_at) : 'Awaiting scan'}
         </span>
       </div>
     </div>

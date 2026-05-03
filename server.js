@@ -423,8 +423,9 @@ app.post('/api/accounts', requireManager, async (req, res) => {
   setImmediate(async () => {
     try {
       console.log(`[Setup] Initial scrape for @${clean}`);
-      const posts = await scrapeAccountPosts(clean);
+      const posts = await scrapeAccountPosts(clean, { limit: 30, parentData: true });
       processNewPosts(accountId, posts);
+      db.prepare("UPDATE accounts SET last_scan_status = 'ok', last_scan_error = NULL WHERE id = ?").run(accountId);
       console.log(`[Setup] Done — ${posts.length} posts for @${clean}`);
     } catch (err) {
       console.error(`[Setup] Failed for @${clean}:`, err.message);

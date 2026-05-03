@@ -750,6 +750,7 @@ select option { background: var(--bg-2); }
   font-size: 10px;
 }
 .pod-poll.never { color: var(--amber); }
+.pod-poll.error { color: var(--red); cursor: help; }
 
 /* ── Add Account Form ──────────────────────────────────────── */
 .add-account-form {
